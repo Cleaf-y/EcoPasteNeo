@@ -5,6 +5,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Datelike, Local, Utc};
+use ecopaste_neo_core::content::sanitize_css_color;
+use ecopaste_neo_core::writeback::WritebackGuard;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -12,8 +14,8 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::clipboard::{
     add_app_from_path, build_item_with_settings, delete_unreferenced_apps, detect_frontmost,
-    materialize_source, persist_and_notify, refresh_running_apps, sanitize_css_color, AppIconStore,
-    AppsRegistry, ClipboardReader, FileIconStore, ImageStore, WritebackGuard,
+    materialize_source, persist_and_notify, refresh_running_apps, AppIconStore, AppsRegistry,
+    ClipboardReader, FileIconStore, ImageStore,
 };
 use crate::core::{AppError, Result};
 use crate::db::items::{

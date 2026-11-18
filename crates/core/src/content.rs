@@ -1,4 +1,4 @@
-//! 文本子类型识别与富文本转纯文本（纯逻辑，便于单测）。
+//! 剪贴板文本子类型与颜色预览校验。
 //!
 //! 判定顺序：`url` > `email` > `color` > `path`。
 
@@ -6,11 +6,24 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
-use crate::db::models::ClipboardSubKind;
+/// 剪贴板子类型；JSON 和 SQLite 均沿用已发布的小写值。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "sqlx", derive(sqlx::Type))]
+#[cfg_attr(feature = "sqlx", sqlx(rename_all = "lowercase"))]
+pub enum ClipboardSubKind {
+    Rtf,
+    Html,
+    Url,
+    Email,
+    Color,
+    Path,
+}
 
 /// URL：要求带协议头（http/https/ftp/file）或 `www.` 开头的单行串。
-/// 规则保持收紧，避免把任意带点的词误判为链接。
+/// 要求明确的链接前缀，避免把任意带点的词误判为链接。
 static URL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^(https?|ftp|file)://[^\s]+$|^www\.[^\s]+\.[^\s]+$")
         .expect("invalid URL regex")
@@ -47,7 +60,7 @@ static GRADIENT_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// 均不命中返回 `None`（普通文本）。
 ///
 /// 注意：`path` 分支会触碰文件系统（`exists`），且仅认**绝对路径**——
-/// 相对路径的存在性取决于进程 cwd（监听线程下不可控），收紧以避免误判。
+/// 相对路径的存在性取决于进程 cwd（监听线程下不可控），仅接受绝对路径以避免误判。
 pub fn detect_text_sub_kind(text: &str) -> Option<ClipboardSubKind> {
     let value = text.trim();
     if value.is_empty() {
@@ -161,6 +174,52 @@ mod tests {
     }
 
     #[test]
+    fn keeps_url_priority_over_embedded_subtypes() {
+        for value in [
+            "https://user@example.com/#fff",
+            "file:///existing-or-missing-path.txt",
+            "www.example.com/user@example.com",
+        ] {
+            assert_eq!(detect_text_sub_kind(value), Some(ClipboardSubKind::Url));
+        }
+    }
+
+    #[test]
+    fn ignores_plain_or_empty_text() {
+        for value in [
+            "",
+            " \t\n",
+            "普通文本",
+            "hello world",
+            "example.com",
+            "https://a.b\nmore",
+        ] {
+            assert_eq!(detect_text_sub_kind(value), None, "plain text: {value:?}");
+        }
+    }
+
+    #[test]
+    fn sanitizes_colors_and_rejects_unsafe_values() {
+        assert_eq!(sanitize_css_color("  #FfF  ").as_deref(), Some("#FfF"));
+
+        for value in [
+            "",
+            "red",
+            "url(https://example.com)",
+            "rgb(1 2 3);color:red",
+            "rgb(expression(1))",
+            "color(javascript:alert(1))",
+            "color(@import test)",
+            "rgb(<style>)",
+            "rgb(1 2 3))",
+            "rgb((1 2 3)",
+            "linear-gradient(red, URL(https://example.com))",
+        ] {
+            assert_eq!(sanitize_css_color(value), None, "unsafe value: {value:?}");
+        }
+    }
+
+    #[test]
     fn detects_email() {
         assert_eq!(
             detect_text_sub_kind("user@example.com"),
@@ -170,7 +229,7 @@ mod tests {
             detect_text_sub_kind("张三@example.com.cn"),
             Some(ClipboardSubKind::Email)
         );
-        // 常见但此前被 EMAIL_RE 漏判的本地部分：含 . + _ - %
+        // 常见邮箱本地部分：含 . + _ - %
         assert_eq!(
             detect_text_sub_kind("first.last@example.com"),
             Some(ClipboardSubKind::Email),
@@ -267,30 +326,39 @@ mod tests {
             assert_eq!(sanitize_css_color(s).as_deref(), Some(s));
         }
 
-        // 含注入风险或括号不平衡的渐变串：识别命中但 sanitize 拒绝。
+        // 识别与颜色预览均拒绝含注入风险或括号不平衡的渐变串。
         for bad in [
             "linear-gradient(to right, url(http://x))",
             "linear-gradient(to right, #fff;color:red)",
             "linear-gradient(to right, #fff",
         ] {
+            assert_eq!(detect_text_sub_kind(bad), None, "should reject: {bad:?}");
             assert_eq!(sanitize_css_color(bad), None, "should reject: {bad:?}");
         }
     }
 
     #[test]
     fn detects_existing_absolute_path_only() {
-        let dir = std::env::temp_dir();
-        let file = dir.join(format!("ecopaste-detect-{}.txt", uuid::Uuid::new_v4()));
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("content.txt");
         std::fs::write(&file, b"x").unwrap();
 
+        for path in [file.as_path(), dir.path()] {
+            let value = path.to_str().unwrap();
+            assert_eq!(detect_text_sub_kind(value), Some(ClipboardSubKind::Path));
+            assert_eq!(
+                detect_text_sub_kind(&format!("  {value}  ")),
+                Some(ClipboardSubKind::Path)
+            );
+        }
+
         assert_eq!(
-            detect_text_sub_kind(file.to_str().unwrap()),
-            Some(ClipboardSubKind::Path)
+            detect_text_sub_kind(dir.path().join("missing.txt").to_str().unwrap()),
+            None
         );
-        // 不存在的绝对路径、相对路径都不判 path。
-        assert_eq!(detect_text_sub_kind("/nope/does/not/exist/xyz"), None);
         assert_eq!(detect_text_sub_kind("src"), None);
 
-        std::fs::remove_file(&file).ok();
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(detect_text_sub_kind(file.to_str().unwrap()), None);
     }
 }

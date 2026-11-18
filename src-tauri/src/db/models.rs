@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+pub use ecopaste_neo_core::content::ClipboardSubKind;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -9,18 +10,6 @@ pub enum ClipboardKind {
     Text,
     Image,
     Files,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(rename_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub enum ClipboardSubKind {
-    Rtf,
-    Html,
-    Url,
-    Email,
-    Color,
-    Path,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, sqlx::Type)]
@@ -101,7 +90,7 @@ pub struct ClipboardItem {
     #[sqlx(skip)]
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub available_actions: Vec<ClipboardAction>,
-    /// `sub_kind = Color` 时的规范化 CSS 颜色串（命令层用 [`crate::clipboard::sanitize_css_color`] 校验后填充）。
+    /// `sub_kind = Color` 时的规范化 CSS 颜色串（命令层用 [`ecopaste_neo_core::content::sanitize_css_color`] 校验后填充）。
     /// 前端可直接塞 `style.background`，无需自行判断 `summary` 是否合法。
     #[sqlx(skip)]
     #[serde(default, skip_serializing_if = "Option::is_none")]

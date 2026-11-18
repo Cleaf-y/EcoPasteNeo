@@ -15,6 +15,7 @@ dependencies = [
  "clipboard-rs",
  "core-graphics 0.25.0",
  "drag",
+ "ecopaste-neo-core",
  "file_icon_provider",
  "image",
  "log",
@@ -1392,6 +1393,15 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "ecopaste-neo-core"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "sqlx",
+]
 
 [[package]]
 name = "either"

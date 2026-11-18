@@ -14,7 +14,9 @@ Windows 剪贴板变更通知可能早于其他程序释放剪贴板。监听器
 
 来源应用在读取剪贴板前捕获，避免异步入库时前台应用已经改变。macOS 用 bundle id，Windows 用可执行文件路径标识来源；应用信息入库失败时可以去掉来源，但不能丢弃剪贴板内容。
 
-实现入口：[监听器](../src-tauri/src/clipboard/watcher.rs)、[写回](../src-tauri/src/clipboard/write.rs)、[命令](../src-tauri/src/commands/clipboard.rs)。
+文本子类型识别与颜色预览校验共用 `crates/core` 的 `content` 模块，判定顺序为 URL、邮箱、颜色、本机存在的绝对路径。`ClipboardSubKind` 也由该模块定义，JSON 与 SQLite 值保持小写；旧应用通过 core 的 `sqlx` feature 启用数据库适配，不再单独维护识别正则或子类型枚举。
+
+实现入口：[内容识别](../crates/core/src/content.rs)、[写回抑制规则](../crates/core/src/writeback.rs)、[监听器](../src-tauri/src/clipboard/watcher.rs)、[写回](../src-tauri/src/clipboard/write.rs)、[命令](../src-tauri/src/commands/clipboard.rs)。从仓库根目录运行 `cargo test -p ecopaste-neo-core` 即可验证内容识别与写回抑制，无需 Tauri、GPUI 或系统剪贴板。现有桌面应用仍用 `src-tauri/Cargo.toml` 和原锁文件构建。
 
 ## 数据库、资源目录与备份
 

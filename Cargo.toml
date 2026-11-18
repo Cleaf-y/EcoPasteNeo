@@ -1,0 +1,5 @@
+[workspace]
+members = ["crates/core"]
+# The existing Tauri application still builds with its own lockfile.
+exclude = ["src-tauri"]
+resolver = "2"

@@ -17,8 +17,8 @@
 
 use clipboard_rs::common::RustImage;
 use clipboard_rs::{Clipboard, ClipboardContent, ClipboardContext, RustImageData};
+use ecopaste_neo_core::writeback::WritebackGuard;
 
-use super::guard::WritebackGuard;
 use super::storage::ImageStore;
 use crate::core::{AppError, Result};
 use crate::db::items::content_hash;
@@ -151,7 +151,7 @@ mod tests {
     use super::super::payload::ImagePayload;
     use super::super::read::ClipboardReader;
     use super::*;
-    use crate::clipboard::{build_item, ImageStore, WritebackGuard};
+    use crate::clipboard::{build_item, ImageStore};
     use crate::db::models::Platform;
     use chrono::Utc;
 

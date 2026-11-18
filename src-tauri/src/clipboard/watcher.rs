@@ -14,13 +14,13 @@ use std::time::Duration;
 
 use chrono::Utc;
 use clipboard_rs::{ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext};
+use ecopaste_neo_core::writeback::WritebackGuard;
 use serde_json::json;
 use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::app_store::AppIconStore;
 use super::apps_registry::AppsRegistry;
-use super::guard::WritebackGuard;
 use super::ingest::build_item_with_settings;
 use super::read::ClipboardReader;
 use super::sound;
@@ -352,7 +352,7 @@ mod tests {
     use clipboard_rs::{Clipboard, ClipboardContext};
 
     use super::*;
-    use crate::clipboard::{build_item, ImageStore, WritebackGuard};
+    use crate::clipboard::{build_item, ImageStore};
     use crate::db::items::find_item_by_id;
     use crate::db::test_support::memory_pool;
 

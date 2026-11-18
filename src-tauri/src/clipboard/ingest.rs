@@ -1,5 +1,5 @@
 //! 把读取到的 [`ClipboardPayload`] 转换为可入库的 [`ClipboardItem`]：
-//! 编排子类型识别（[`super::detect`]）与图片落盘（[`super::storage`]）。
+//! 编排子类型识别（[`ecopaste_neo_core::content`]）与图片落盘（[`super::storage`]）。
 //!
 //! 文本存储语义（按用户采集顺序在 HTML / RTF / plain 之间择一）：
 //! - `content` 存**源表示**（HTML/RTF 原文、或纯文本），供前端渲染与写回；
@@ -10,8 +10,8 @@
 //! [`content_hash(Image, file_name)`]，而 `file_name` 源自 PNG 字节哈希 → 去重对字节敏感。
 
 use chrono::Utc;
+use ecopaste_neo_core::content::detect_text_sub_kind;
 
-use super::detect::detect_text_sub_kind;
 use super::payload::{ClipboardPayload, TextPayload};
 use super::secrets::contains_secret;
 use super::storage::ImageStore;

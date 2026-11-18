@@ -1,9 +1,7 @@
 mod app_store;
 mod apps_registry;
 mod cleanup;
-mod detect;
 mod file_icon_store;
-mod guard;
 mod icon;
 mod ingest;
 mod payload;
@@ -19,9 +17,7 @@ pub use app_store::AppIconStore;
 pub use apps_registry::{
     add_app_from_path, delete_unreferenced_apps, refresh_running_apps, AppsRegistry,
 };
-pub use detect::sanitize_css_color;
 pub use file_icon_store::FileIconStore;
-pub use guard::WritebackGuard;
 pub use icon::{get_icon_cache_key, icon_png, DIR_CACHE_KEY};
 #[cfg(test)]
 pub use ingest::build_item;
