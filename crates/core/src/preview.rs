@@ -52,17 +52,8 @@ pub fn file_previews(content: &str, file_types: Option<&str>, limit: usize) -> V
 /// Decoding runs on the caller's worker thread. Invalid names and linked paths are
 /// refused, so a database record cannot redirect image reads outside this store.
 pub fn image_thumbnail(paths: &DataPaths, file_name: &str) -> Option<PathBuf> {
-    let hash = file_name.strip_suffix(".png")?;
-    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return None;
-    }
-    let store = paths.resources_dir().join("clipboard-images");
-    let source = store.join("origin").join(&hash[..2]).join(file_name);
-    let target = store.join("thumbnails").join(&hash[..2]).join(file_name);
-    let resources = paths.resources_dir();
-    if has_symlink(&resources, &source) || has_symlink(&resources, &target) {
-        return None;
-    }
+    let source = image_resource_path(paths, "origin", file_name)?;
+    let target = image_resource_path(paths, "thumbnails", file_name)?;
     if target.is_file() {
         return Some(target);
     }
@@ -103,4 +94,77 @@ fn has_symlink(root: &Path, path: &Path) -> bool {
         }
     }
     false
+}
+
+/// A verified original image, never a card thumbnail.
+#[derive(Debug)]
+pub struct OriginalImage {
+    pub path: PathBuf,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Resolve an original using the same filename and linked-path checks as thumbnails.
+pub fn image_original(paths: &DataPaths, file_name: &str) -> Option<OriginalImage> {
+    let path = image_resource_path(paths, "origin", file_name)?;
+    let (width, height) = image::image_dimensions(&path).ok()?;
+    Some(OriginalImage {
+        path,
+        width,
+        height,
+    })
+}
+
+/// Validate a single image reference before allowing a filesystem read or write.
+fn image_resource_path(paths: &DataPaths, directory: &str, file_name: &str) -> Option<PathBuf> {
+    let hash = file_name.strip_suffix(".png")?;
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let resources = paths.resources_dir();
+    let path = resources
+        .join("clipboard-images")
+        .join(directory)
+        .join(&hash[..2])
+        .join(file_name);
+    (!has_symlink(&resources, &path)).then_some(path)
+}
+
+/// The display payload contains no original sensitive content.
+#[derive(Debug)]
+pub enum PreviewContent {
+    Text(String),
+    Image(Option<OriginalImage>),
+    Files(Vec<FilePreview>),
+    Hidden,
+}
+
+/// Prepare a full record for display on a worker, enforcing masking before resource access.
+#[cfg(feature = "sqlx")]
+pub fn record_content(
+    paths: &DataPaths,
+    item: &crate::db::models::ClipboardItem,
+) -> PreviewContent {
+    use crate::{content::ClipboardSubKind, db::models::ClipboardKind};
+
+    if item.is_sensitive {
+        return PreviewContent::Hidden;
+    }
+    match item.kind {
+        ClipboardKind::Text => {
+            let text = match item.sub_kind {
+                Some(ClipboardSubKind::Html | ClipboardSubKind::Rtf) => {
+                    item.search_text.as_deref().unwrap_or_default()
+                }
+                _ => &item.content,
+            };
+            PreviewContent::Text(text.to_owned())
+        }
+        ClipboardKind::Image => PreviewContent::Image(image_original(paths, &item.content)),
+        ClipboardKind::Files => PreviewContent::Files(file_previews(
+            &item.content,
+            item.file_types.as_deref(),
+            usize::MAX,
+        )),
+    }
 }

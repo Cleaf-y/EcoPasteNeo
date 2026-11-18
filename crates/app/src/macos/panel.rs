@@ -3,6 +3,7 @@ use std::{sync::Arc, time::Duration};
 use ecopaste_neo_app::{
     history::{CaptureSession, HistorySource, HistoryState},
     locale::Locale,
+    record_preview::fitted_image_size,
 };
 use ecopaste_neo_core::{db::models::ClipboardKind, identity::PRODUCT_NAME};
 use gpui::{
@@ -18,6 +19,7 @@ use gpui_component::{
 use super::{
     native::{self, Panel},
     paste,
+    record_preview::PreviewWindow,
 };
 use ecopaste_neo_core::writeback::WritebackGuard;
 
@@ -39,6 +41,7 @@ pub struct HistoryPanel {
     target: Option<i32>,
     interaction: u64,
     refresh_pending: bool,
+    preview: Option<PreviewWindow>,
 }
 
 impl HistoryPanel {
@@ -55,15 +58,16 @@ impl HistoryPanel {
         input.update(cx, |input, cx| input.focus(window, cx));
         cx.subscribe_in(&input, window, |this, input, event, _, cx| {
             if matches!(event, InputEvent::Change) {
+                this.close_preview(false, cx);
                 this.state.reset(input.read(cx).value().to_string());
                 this.list.reset(0);
                 this.load_more(true, cx);
             }
         })
         .detach();
-        cx.observe_window_activation(window, |this, window, cx| {
-            if !window.is_window_active() && this.visible && !this.pinned && !this.pasting {
-                this.hide(cx);
+        cx.observe_window_activation(window, |_, window, cx| {
+            if !window.is_window_active() {
+                cx.on_next_frame(window, |this, _, cx| this.check_panel_focus(cx));
             }
         })
         .detach();
@@ -106,6 +110,7 @@ impl HistoryPanel {
             target: None,
             interaction: 0,
             refresh_pending: false,
+            preview: None,
         };
         view.load_more(false, cx);
         view
@@ -128,6 +133,7 @@ impl HistoryPanel {
     }
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
+        self.close_preview(false, cx);
         self.interaction += 1;
         self.visible = false;
         self.panel.hide();
@@ -152,6 +158,7 @@ impl HistoryPanel {
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.close_preview(false, cx);
         self.refresh_pending = false;
         self.state.reset(self.state.keyword.clone());
         self.list.reset(0);
@@ -179,7 +186,9 @@ impl HistoryPanel {
             cx.notify();
             return;
         };
-        let prepared = self.source.prepare_write(row.item.id.clone(), plain);
+        let id = row.item.id.clone();
+        self.close_preview(false, cx);
+        let prepared = self.source.prepare_write(id, plain);
         let session = self.interaction;
         self.pasting = true;
         self.action_error = None;
@@ -244,6 +253,105 @@ impl HistoryPanel {
         cx.notify();
     }
 
+    /// Preview focus belongs to the same panel session, not to a new paste target.
+    pub(super) fn check_panel_focus(&mut self, cx: &mut Context<Self>) {
+        if !self.visible
+            || self.pinned
+            || self.pasting
+            || self.panel.is_key()
+            || self
+                .preview
+                .as_ref()
+                .is_some_and(|preview| preview.is_key(cx))
+        {
+            return;
+        }
+        self.hide(cx);
+    }
+
+    /// Return focus to the existing main panel without changing the saved target.
+    pub(super) fn close_preview(&mut self, restore_focus: bool, cx: &mut Context<Self>) {
+        if let Some(preview) = &self.preview {
+            preview.close(cx);
+        }
+        if restore_focus && self.visible {
+            self.panel.restore_key();
+        }
+        cx.notify();
+    }
+
+    /// Reuse one nonactivating child, leaving the saved external process untouched.
+    fn open_preview(&mut self, cx: &mut Context<Self>) {
+        if self.pasting {
+            return;
+        }
+        let Some(id) = self
+            .state
+            .rows
+            .get(self.state.selected)
+            .map(|row| row.item.id.clone())
+        else {
+            return;
+        };
+        if self.preview.is_none() {
+            match PreviewWindow::new(
+                self.source.clone(),
+                self.locale,
+                cx.entity().downgrade(),
+                &self.panel,
+                cx,
+            ) {
+                Ok(preview) => self.preview = Some(preview),
+                Err(_) => {
+                    self.action_error = Some(self.locale.preview_failed().to_owned());
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+        if let Some(preview) = &self.preview {
+            preview.show(id, &self.panel, cx);
+        }
+        cx.notify();
+    }
+
+    fn toggle_preview(&mut self, cx: &mut Context<Self>) {
+        if self
+            .preview
+            .as_ref()
+            .is_some_and(|preview| preview.is_open(cx))
+        {
+            self.close_preview(true, cx);
+        } else {
+            self.open_preview(cx);
+        }
+    }
+
+    fn update_open_preview(&mut self, cx: &mut Context<Self>) {
+        if self
+            .preview
+            .as_ref()
+            .is_some_and(|preview| preview.is_open(cx))
+        {
+            self.open_preview(cx);
+        }
+    }
+
+    /// Navigation from the child window follows the same selected record as the list.
+    pub(super) fn select_preview_neighbor(&mut self, down: bool, cx: &mut Context<Self>) {
+        if self.state.rows.is_empty() {
+            return;
+        }
+        self.state.selected = if down {
+            (self.state.selected + 1).min(self.state.rows.len() - 1)
+        } else {
+            self.state.selected.saturating_sub(1)
+        };
+        self.list.scroll_to_reveal_item(self.state.selected);
+        self.update_open_preview(cx);
+        cx.notify();
+    }
+
     /// Debounce keyword changes, then accept only the matching search generation.
     fn load_more(&mut self, debounce: bool, cx: &mut Context<Self>) {
         let Some(request) = self.state.begin() else {
@@ -293,6 +401,7 @@ impl HistoryPanel {
                     _ => last,
                 };
                 self.list.scroll_to_reveal_item(self.state.selected);
+                self.update_open_preview(cx);
                 if self.state.selected.saturating_add(8) >= self.state.rows.len()
                     && self.state.error.is_none()
                 {
@@ -306,7 +415,19 @@ impl HistoryPanel {
                 cx.stop_propagation();
             }
             "escape" => {
-                self.hide(cx);
+                if self
+                    .preview
+                    .as_ref()
+                    .is_some_and(|preview| preview.is_open(cx))
+                {
+                    self.close_preview(true, cx);
+                } else {
+                    self.hide(cx);
+                }
+                cx.stop_propagation();
+            }
+            "p" if event.keystroke.modifiers.platform => {
+                self.toggle_preview(cx);
                 cx.stop_propagation();
             }
             "q" if event.keystroke.modifiers.platform => {
@@ -344,7 +465,24 @@ impl HistoryPanel {
                     String::new()
                 }
             ))
-            .child(row.item.created_at.format("%m-%d %H:%M").to_string());
+            .child(
+                div()
+                    .flex()
+                    .gap_3()
+                    .child(row.item.created_at.format("%m-%d %H:%M").to_string())
+                    .child(
+                        div()
+                            .id(("preview-row", index))
+                            .cursor_pointer()
+                            .text_color(theme.primary)
+                            .child(locale.preview())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.state.selected = index;
+                                this.open_preview(cx);
+                            })),
+                    ),
+            );
         let mut card = div()
             .id(("history-row", index))
             .w_full()
@@ -379,14 +517,28 @@ impl HistoryPanel {
                 let width = row.item.width.unwrap_or(1).max(1) as f32;
                 let height = row.item.height.unwrap_or(1).max(1) as f32;
                 let preview_height = (height / width * 280.0).clamp(72.0, 180.0);
+                let (image_width, image_height) =
+                    fitted_image_size(width, height, 280.0, preview_height);
                 card = card
                     .child(match &row.thumbnail {
-                        Some(path) => div().h(px(preview_height)).child(
-                            img(path.clone())
-                                .w_full()
-                                .h_full()
-                                .object_fit(ObjectFit::Contain),
-                        ),
+                        Some(path) => div()
+                            .w_full()
+                            .h(px(preview_height))
+                            .overflow_hidden()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                img(path.clone())
+                                    .w(px(image_width))
+                                    .max_w_full()
+                                    .h(px(image_height))
+                                    .max_h(px(preview_height))
+                                    .flex_none()
+                                    .min_w_0()
+                                    .min_h_0()
+                                    .object_fit(ObjectFit::Contain),
+                            ),
                         None => div()
                             .h(px(preview_height))
                             .flex()
@@ -517,6 +669,13 @@ impl Render for HistoryPanel {
         let controls = div()
             .flex()
             .gap_3()
+            .child(
+                div()
+                    .id("preview-selected")
+                    .cursor_pointer()
+                    .child(locale.preview())
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_preview(cx))),
+            )
             .child(
                 div()
                     .id("pin-panel")

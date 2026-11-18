@@ -27,7 +27,8 @@ impl Options {
         };
         let mut locale = Locale::ZhCn;
         let mut show = std::env::var_os("ECOPASTENEO_SHOW").is_some_and(|value| value == "1");
-        let mut capture = true;
+        let mut capture =
+            !std::env::var_os("ECOPASTENEO_NO_CAPTURE").is_some_and(|value| value == "1");
         while let Some(argument) = args.next() {
             match argument.as_str() {
                 "--show" => show = true,

@@ -1,6 +1,6 @@
 # macOS 原生历史面板
 
-`crates/app` 是独立的 GPUI 应用入口，生成 `EcoPasteNeo`。现有 Tauri 应用仍通过 `src-tauri/Cargo.toml` 构建。当前原生面板提供 SQLite 历史列表、搜索、分页、后台剪贴板捕获和所选记录写回。macOS 真实捕获、目标应用粘贴及固定窗口交互仍需人工验收。Windows 原生面板暂缓，旧 Windows 实现保留。
+`crates/app` 是独立的 GPUI 应用入口，生成 `EcoPasteNeo`。现有 Tauri 应用仍通过 `src-tauri/Cargo.toml` 构建。当前原生面板提供 SQLite 历史列表、搜索、分页、后台剪贴板捕获和所选记录写回。macOS 的运行与验证步骤见下文。Windows 原生面板暂缓，旧 Windows 实现保留。
 
 ## 构建与运行
 
@@ -59,6 +59,27 @@ cargo fmt --all --check
 ```
 
 这些检查覆盖查询隔离、分页、重开与资源处理，不能替代实际 `.app` 的滚动、键盘、系统拼音和目标应用焦点验证。
+
+## 记录预览
+
+选择记录后按 **⌘P**，或点击卡片上的“预览”打开完整内容。预览打开时，主面板的 ↑↓ 选择会同步切换预览；预览窗口内的 ↑↓ 也可以切换记录。Esc 先关闭预览，再按一次才隐藏主面板。预览的“关闭预览”按钮只返回主面板，不重新保存粘贴目标。原有记录点击粘贴和 Enter 粘贴保持可用。
+
+列表仍只查询摘要，预览经 `HistorySource::preview` 按 ID 在 worker 查询全文并准备资源。预览请求有独立编号；切换记录、关闭窗口、搜索变化和主面板隐藏都会让旧结果失效。敏感记录只返回遮盖状态，不能通过预览读取原文。HTML/RTF 显示系统捕获时保存的纯文本；没有纯文本的旧记录显示空内容，不把标记当正文显示。
+
+长文本使用变高虚拟列表，按段滚动到末尾。图片使用经过 Neo 图片目录校验的原图，并显示原始像素尺寸；原图丢失时显示不可用，即使缩略图仍存在也不替代原图。文件列表展示全部引用，每次打开重新读取文件信息，保留已丢失项。预览作为非激活子窗口随主面板隐藏，不改变原外部应用的粘贴目标。
+
+隔离夹具可用以下命令生成。测试包关闭系统监听，仍允许验证者主动触发粘贴：
+
+```bash
+fixture_parent="$(mktemp -d /private/tmp/ecopaste-preview07.XXXXXX)"
+cargo run -p ecopaste-neo-app --example seed_preview --locked -- \
+  --data-parent "$fixture_parent" --environment dev
+./scripts/package-neo-macos.sh --test-data-parent "$fixture_parent" --test-no-capture
+```
+
+7 条夹具分别可用 `preview07-long`、`preview07-short`、`preview07-html`、`preview07-rtf`、`preview07-image`、`preview07-files`、`preview07-sensitive` 搜索。长文本末尾为 `PREVIEW07-LONG-END-7F3A`，完整对照文件保存在测试库的 `state/preview07/long-expected.txt`；原图为 4096×2048。`preview07-switch` 只匹配大图和短文本，用于快速切换后立即关闭的检查。文件夹具包含 `move-me.txt`，移到别处后重新打开预览应显示不可用。
+
+`--test-no-capture` 必须与 `--test-data-parent` 同用，将 `ECOPASTENEO_NO_CAPTURE=1` 写入该测试包的启动环境。正常包默认仍开启监听；这个选项用于预览验证，不代替任务 05 的捕获验收。每次生成夹具都要求空库，不覆盖已有记录。
 
 ## 粘贴与捕获验收
 

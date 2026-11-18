@@ -118,6 +118,18 @@ impl HistorySource {
         })
     }
 
+    /// Read complete content only for the requested ID, with masking and resource validation.
+    pub fn preview(&self, id: String) -> tokio::task::JoinHandle<Result<preview::PreviewContent>> {
+        let pool = self.pool.clone();
+        let paths = self.paths.clone();
+        self.runtime.spawn(async move {
+            let item = db::items::find_item_by_id(&pool, &id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("History item no longer exists"))?;
+            Ok(tokio::task::spawn_blocking(move || preview::record_content(&paths, &item)).await?)
+        })
+    }
+
     /// SQL and filesystem preparation run outside the UI executor.
     pub fn query(
         &self,
@@ -404,5 +416,199 @@ impl Drop for CaptureSession {
         if let Some(worker) = self.worker.take() {
             let _ = self.runtime.block_on(worker);
         }
+    }
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+    use crate::locale::Locale;
+    use ecopaste_neo_core::{paths::Environment, preview::PreviewContent};
+
+    fn source(parent: &std::path::Path) -> HistorySource {
+        HistorySource::open(&Options {
+            data_parent: parent.to_path_buf(),
+            environment: Environment::Dev,
+            locale: Locale::ZhCn,
+            show: false,
+            capture: false,
+        })
+        .unwrap()
+    }
+
+    fn insert(
+        source: &HistorySource,
+        id: &str,
+        kind: &str,
+        sub_kind: Option<&str>,
+        content: &str,
+        plain: Option<&str>,
+        sensitive: bool,
+    ) {
+        source.runtime.block_on(async {
+            sqlx::query("INSERT INTO clipboard_items (id,kind,sub_kind,content,content_hash,search_text,summary,is_sensitive,platform,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,'macos','2026-11-18T00:00:00Z','2026-11-18T00:00:00Z')")
+                .bind(id).bind(kind).bind(sub_kind).bind(content).bind(id).bind(plain).bind(plain.map(|text| text.chars().take(512).collect::<String>())).bind(sensitive).execute(&source.pool).await.unwrap();
+        });
+    }
+
+    fn preview(source: &HistorySource, id: &str) -> PreviewContent {
+        source
+            .runtime
+            .block_on(source.preview(id.to_owned()))
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn full_plain_and_rich_text_preview_preserves_paste_content_and_masks_sensitive_data() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = source(temporary.path());
+        let long = format!("{}\nPREVIEW-LONG-END", "完整文本 🌳\n".repeat(1000));
+        insert(&source, "plain", "text", None, &long, Some(&long), false);
+        insert(
+            &source,
+            "html",
+            "text",
+            Some("html"),
+            "<script>not display content</script><b>HTML</b>",
+            Some("HTML plain tail"),
+            false,
+        );
+        insert(
+            &source,
+            "rtf",
+            "text",
+            Some("rtf"),
+            "{\\rtf1 raw markup}",
+            Some("RTF plain tail"),
+            false,
+        );
+        insert(
+            &source,
+            "no-plain",
+            "text",
+            Some("html"),
+            "<b>raw markup must stay hidden</b>",
+            None,
+            false,
+        );
+        insert(
+            &source,
+            "sensitive",
+            "text",
+            None,
+            "private test fixture",
+            Some("private test fixture"),
+            true,
+        );
+        assert!(matches!(preview(&source, "plain"), PreviewContent::Text(text) if text == long));
+        assert!(
+            matches!(preview(&source, "html"), PreviewContent::Text(text) if text == "HTML plain tail")
+        );
+        assert!(
+            matches!(preview(&source, "rtf"), PreviewContent::Text(text) if text == "RTF plain tail")
+        );
+        assert!(
+            matches!(preview(&source, "no-plain"), PreviewContent::Text(text) if text.is_empty())
+        );
+        assert!(matches!(
+            preview(&source, "sensitive"),
+            PreviewContent::Hidden
+        ));
+        let page = source
+            .runtime
+            .block_on(source.query(String::new(), 0))
+            .unwrap()
+            .unwrap();
+        let row = page.rows.iter().find(|row| row.item.id == "plain").unwrap();
+        assert!(row.item.content.is_empty());
+        assert_eq!(row.item.summary.as_ref().unwrap().chars().count(), 512);
+        let write = source
+            .runtime
+            .block_on(source.prepare_write("plain".into(), false))
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(write.payload, ecopaste_neo_core::clipboard::write::WritePayload::Text { plain, .. } if plain == long)
+        );
+        assert!(
+            source
+                .runtime
+                .block_on(source.preview("missing".into()))
+                .unwrap()
+                .is_err()
+        );
+        source.runtime.block_on(source.pool.close());
+    }
+
+    #[test]
+    fn original_image_and_full_file_list_are_rechecked_on_every_open() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = source(temporary.path());
+        let name = format!("{}.png", "ab".repeat(32));
+        let image = source
+            .paths
+            .resources_dir()
+            .join("clipboard-images/origin/ab")
+            .join(&name);
+        std::fs::create_dir_all(image.parent().unwrap()).unwrap();
+        image::RgbImage::new(1600, 900).save(&image).unwrap();
+        insert(&source, "image", "image", None, &name, None, false);
+        insert(&source, "hidden-image", "image", None, &name, None, true);
+        let file = temporary.path().join("existing.txt");
+        std::fs::write(&file, b"fixture").unwrap();
+        let content = format!(
+            "{}\n{}\n{}\n{}",
+            file.display(),
+            temporary.path().display(),
+            temporary.path().join("missing.txt").display(),
+            temporary.path().join("also-missing.txt").display()
+        );
+        insert(&source, "files", "files", None, &content, None, false);
+        insert(&source, "hidden-files", "files", None, &content, None, true);
+        let page = source
+            .runtime
+            .block_on(source.query(String::new(), 0))
+            .unwrap()
+            .unwrap();
+        let thumbnail = page
+            .rows
+            .iter()
+            .find(|row| row.item.id == "image")
+            .unwrap()
+            .thumbnail
+            .as_ref()
+            .unwrap();
+        assert_eq!(image::image_dimensions(thumbnail).unwrap(), (300, 169));
+        assert!(
+            matches!(preview(&source, "image"), PreviewContent::Image(Some(original)) if original.path == image && original.width == 1600 && original.height == 900)
+        );
+        let PreviewContent::Files(files) = preview(&source, "files") else {
+            panic!("expected files");
+        };
+        assert_eq!(files.len(), 4);
+        assert!(files[0].exists);
+        assert!(files[1].is_directory);
+        assert!(!files[2].exists);
+        assert!(matches!(
+            preview(&source, "hidden-image"),
+            PreviewContent::Hidden
+        ));
+        assert!(matches!(
+            preview(&source, "hidden-files"),
+            PreviewContent::Hidden
+        ));
+        std::fs::rename(file, temporary.path().join("moved.txt")).unwrap();
+        let PreviewContent::Files(files) = preview(&source, "files") else {
+            panic!("expected files");
+        };
+        assert!(!files[0].exists);
+        std::fs::remove_file(image).unwrap();
+        assert!(thumbnail.exists());
+        assert!(matches!(
+            preview(&source, "image"),
+            PreviewContent::Image(None)
+        ));
+        source.runtime.block_on(source.pool.close());
     }
 }

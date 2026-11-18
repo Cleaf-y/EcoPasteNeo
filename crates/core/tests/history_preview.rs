@@ -2,7 +2,7 @@
 
 use ecopaste_neo_core::{
     paths::{Environment, Storage},
-    preview::{file_previews, image_thumbnail},
+    preview::{file_previews, image_original, image_thumbnail},
 };
 
 #[test]
@@ -19,6 +19,9 @@ fn thumbnails_are_small_cached_and_confined_to_resources() {
         .join(&name);
     std::fs::create_dir_all(origin.parent().unwrap()).unwrap();
     image::RgbImage::new(1200, 600).save(&origin).unwrap();
+    let original = image_original(&paths, &name).unwrap();
+    assert_eq!(original.path, origin);
+    assert_eq!((original.width, original.height), (1200, 600));
     let thumbnail = image_thumbnail(&paths, &name).unwrap();
     assert_eq!(image::image_dimensions(&thumbnail).unwrap(), (300, 150));
     let modified = std::fs::metadata(&thumbnail).unwrap().modified().unwrap();
@@ -32,6 +35,7 @@ fn thumbnails_are_small_cached_and_confined_to_resources() {
     );
     for invalid in ["../outside.png", "/tmp/image.png", "é.png", "ab.png"] {
         assert!(image_thumbnail(&paths, invalid).is_none());
+        assert!(image_original(&paths, invalid).is_none());
     }
     assert!(image_thumbnail(&paths, &format!("{}.png", "cd".repeat(32))).is_none());
 }
@@ -76,4 +80,25 @@ fn image_symlinks_do_not_read_external_files() {
     std::fs::create_dir_all(origin.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(&external, origin).unwrap();
     assert!(image_thumbnail(&paths, &name).is_none());
+    assert!(image_original(&paths, &name).is_none());
+}
+
+#[test]
+fn missing_original_does_not_fall_back_to_cached_thumbnail() {
+    let temporary = tempfile::tempdir().unwrap();
+    let paths = Storage::new(temporary.path(), Environment::Dev)
+        .unwrap()
+        .open()
+        .unwrap();
+    let name = format!("{}.png", "ab".repeat(32));
+    let origin = paths
+        .resources_dir()
+        .join("clipboard-images/origin/ab")
+        .join(&name);
+    std::fs::create_dir_all(origin.parent().unwrap()).unwrap();
+    image::RgbImage::new(900, 600).save(&origin).unwrap();
+    let thumbnail = image_thumbnail(&paths, &name).unwrap();
+    std::fs::remove_file(&origin).unwrap();
+    assert!(thumbnail.exists());
+    assert!(image_original(&paths, &name).is_none());
 }

@@ -52,6 +52,27 @@ impl Locale {
     pub fn paste_failed(self) -> &'static str {
         self.text("粘贴失败", "Paste failed")
     }
+    pub fn preview(self) -> &'static str {
+        self.text("预览 ⌘P", "Preview ⌘P")
+    }
+    pub fn preview_title(self) -> &'static str {
+        self.text("记录预览", "Record preview")
+    }
+    pub fn close_preview(self) -> &'static str {
+        self.text("关闭预览", "Close preview")
+    }
+    pub fn preview_failed(self) -> &'static str {
+        self.text("记录不存在或无法预览", "Record is missing or unavailable")
+    }
+    pub fn sensitive_hidden(self) -> &'static str {
+        self.text("敏感内容已隐藏", "Sensitive content hidden")
+    }
+    pub fn original_image(self) -> &'static str {
+        self.text("原图", "Original image")
+    }
+    pub fn empty_content(self) -> &'static str {
+        self.text("无可显示的内容", "No content to display")
+    }
     pub fn hint(self) -> &'static str {
         self.text(
             "⌃⌥⌘V 唤出 · ↑↓ 选择 · Enter 粘贴 · Esc 隐藏",

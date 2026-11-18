@@ -1,6 +1,7 @@
 mod native;
 mod panel;
 mod paste;
+mod record_preview;
 mod system;
 
 use std::time::Duration;

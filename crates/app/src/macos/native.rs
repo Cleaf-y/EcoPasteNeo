@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
-use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow, NSWorkspace};
-use objc2_foundation::{NSMouseInRect, NSPoint};
+use objc2::{MainThreadMarker, MainThreadOnly, msg_send};
+use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow, NSWindowOrderingMode, NSWorkspace};
+use objc2_foundation::{NSMouseInRect, NSPoint, NSRect, NSSize, ns_string};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 
@@ -64,6 +64,73 @@ impl Panel {
             break;
         }
         window.makeKeyAndOrderFront(None);
+    }
+
+    /// Create child windows on the current native screen so their initial scale matches.
+    pub fn display_id(&self) -> Option<gpui::DisplayId> {
+        let screen = self.native().screen()?;
+        let number = screen
+            .deviceDescription()
+            .objectForKey(ns_string!("NSScreenNumber"))?;
+        // SAFETY: AppKit's documented NSScreenNumber entry is an NSNumber display ID.
+        let id: u32 = unsafe { msg_send![&*number, unsignedIntValue] };
+        Some(gpui::DisplayId::new(u64::from(id)))
+    }
+
+    /// Show a child PopUp beside the history panel without activating or recapturing a target.
+    pub fn show_preview(&self, parent: &Panel) {
+        let window = self.native();
+        // SAFETY: This helper is used only for GPUI WindowKind::PopUp, an NSPanel subclass.
+        unsafe {
+            let _: () = msg_send![window, setBecomesKeyOnlyIfNeeded: true];
+        }
+        if let Some(screen) = parent.native().screen() {
+            let area = screen.visibleFrame();
+            let anchor = parent.native().frame();
+            let width = 480.0_f64.min(area.size.width - 24.0).max(1.0);
+            let height = 600.0_f64.min(area.size.height - 24.0).max(1.0);
+            let right = anchor.origin.x + anchor.size.width + 12.0;
+            let left = anchor.origin.x - width - 12.0;
+            let preferred = if right + width <= area.origin.x + area.size.width - 12.0 {
+                right
+            } else {
+                left
+            };
+            let x = preferred.clamp(
+                area.origin.x + 12.0,
+                (area.origin.x + area.size.width - width - 12.0).max(area.origin.x + 12.0),
+            );
+            let y = (anchor.origin.y + anchor.size.height - height).clamp(
+                area.origin.y + 12.0,
+                (area.origin.y + area.size.height - height - 12.0).max(area.origin.y + 12.0),
+            );
+            window.setFrame_display(
+                NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)),
+                true,
+            );
+        }
+        if window.parentWindow().is_none() {
+            // SAFETY: Both live GPUI windows are accessed on their main thread.
+            unsafe {
+                parent
+                    .native()
+                    .addChildWindow_ordered(window, NSWindowOrderingMode::Above);
+            }
+        }
+        window.orderFront(None);
+    }
+
+    /// Detach a closed preview so showing its parent cannot implicitly show it again.
+    pub fn hide_preview(&self) {
+        let window = self.native();
+        window.orderOut(None);
+        if let Some(parent) = window.parentWindow() {
+            parent.removeChildWindow(window);
+        }
+    }
+
+    pub fn is_key(&self) -> bool {
+        self.native().isKeyWindow()
     }
 
     /// Give keys back to the still-active target without activating any application.
