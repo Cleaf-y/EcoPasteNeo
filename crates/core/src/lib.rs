@@ -5,4 +5,6 @@ pub mod content;
 pub mod db;
 pub mod identity;
 pub mod paths;
+#[cfg(feature = "preview")]
+pub mod preview;
 pub mod writeback;

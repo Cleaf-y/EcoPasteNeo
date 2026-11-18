@@ -7,6 +7,7 @@ publish = false
 
 [features]
 default = ["capture"]
+preview = ["dep:image"]
 sqlx = ["dep:sqlx", "dep:chrono", "dep:blake3"]
 
 capture = ["sqlx", "dep:anyhow", "dep:blake3", "dep:image", "dep:log", "dep:uuid"]
