@@ -2,8 +2,8 @@ use anyhow::Context;
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 pub use ecopaste_neo_core::db::items::{
-    content_hash, find_item_by_id, find_item_for_list_by_id, increment_item_use_count,
-    query_items_page, UpsertResult,
+    find_item_by_id, find_item_for_list_by_id, increment_item_use_count, query_items_page,
+    UpsertResult,
 };
 
 use crate::core::Result;
@@ -11,7 +11,7 @@ use crate::db::models::ClipboardKind;
 #[cfg(test)]
 use crate::db::models::{ClipboardItem, ClipboardItemQuery};
 #[cfg(test)]
-pub use ecopaste_neo_core::db::items::{insert_item, upsert_item};
+pub use ecopaste_neo_core::db::items::{content_hash, insert_item, upsert_item};
 
 /// 仅返回项的轻量查询：生产路径走 [`query_items_page`]（顺带返回 total），
 /// 本函数留给单元测试做断言。

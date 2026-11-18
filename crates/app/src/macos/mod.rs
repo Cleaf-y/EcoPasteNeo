@@ -1,5 +1,6 @@
 mod native;
 mod panel;
+mod paste;
 mod system;
 
 use std::time::Duration;
@@ -42,7 +43,9 @@ pub fn run() -> Result<()> {
                 },
                 |window, cx| {
                     window.set_window_title(ecopaste_neo_core::identity::PRODUCT_NAME);
-                    let view = cx.new(|cx| HistoryPanel::new(source, options.locale, window, cx));
+                    let view = cx.new(|cx| {
+                        HistoryPanel::new(source, options.locale, options.capture, window, cx)
+                    });
                     let weak = view.downgrade();
                     window.on_window_should_close(cx, move |_, cx| {
                         let _ = weak.update(cx, |view, cx| view.hide(cx));
@@ -61,6 +64,9 @@ pub fn run() -> Result<()> {
         cx.spawn(async move |cx| {
             loop {
                 executor.timer(Duration::from_millis(25)).await;
+                let _ = handle.update(cx, |_, _, cx| {
+                    panel.update(cx, |view, cx| view.poll_capture(cx));
+                });
                 while let Some(action) = integration.next_action() {
                     if matches!(action, SystemAction::Quit) {
                         cx.update(|cx| cx.quit());

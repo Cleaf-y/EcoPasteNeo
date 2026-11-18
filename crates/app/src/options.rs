@@ -12,6 +12,7 @@ pub struct Options {
     pub environment: Environment,
     pub locale: Locale,
     pub show: bool,
+    pub capture: bool,
 }
 
 impl Options {
@@ -26,9 +27,11 @@ impl Options {
         };
         let mut locale = Locale::ZhCn;
         let mut show = std::env::var_os("ECOPASTENEO_SHOW").is_some_and(|value| value == "1");
+        let mut capture = true;
         while let Some(argument) = args.next() {
             match argument.as_str() {
                 "--show" => show = true,
+                "--no-capture" => capture = false,
                 "--data-parent" => {
                     data_parent = Some(PathBuf::from(
                         args.next()
@@ -64,6 +67,7 @@ impl Options {
             environment,
             locale,
             show,
+            capture,
         })
     }
 }
@@ -105,12 +109,14 @@ mod tests {
             "--locale",
             "en-US",
             "--show",
+            "--no-capture",
         ]))
         .unwrap();
         assert_eq!(options.data_parent, PathBuf::from("/tmp/neo-options-test"));
         assert_eq!(options.environment, Environment::Dev);
         assert!(matches!(options.locale, Locale::EnUs));
         assert!(options.show);
+        assert!(!options.capture);
     }
     #[test]
     fn malformed_startup_arguments_do_not_fall_back_to_user_storage() {

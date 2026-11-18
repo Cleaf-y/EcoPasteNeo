@@ -1374,6 +1374,7 @@ name = "ecopaste-neo-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "core-graphics 0.24.0",
  "ecopaste-neo-core",
  "global-hotkey",
  "gpui-component",

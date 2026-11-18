@@ -1,149 +1,24 @@
-//! 剪贴板写回：把 [`ClipboardItem`] 按类型写回系统剪贴板（text / html / rtf / image / files）。
-//!
-//! 时序约束：[`ClipboardContext`] 是 `!Send`，调用方需在不跨 await 的同步段内完成调用
-//! （命令层照 `read_clipboard` 的写法处理）。
-//!
-//! 回环抑制：写回前向 [`WritebackGuard`] 登记将写入内容的 `content_hash`，
-//! OS 监听重新读到同内容时跳过入库，避免「点击粘贴 → 自动新增一条」回环。
-//! 哈希必须与 [`crate::clipboard::ingest::build_item`] 在 watcher 路径上将算出的哈希一致：
-//! - text / html / rtf：watcher 拿到的 plain/html/rtf 经 `draft_from_text` 后 `content` 即我们写入的串，
-//!   `content_hash(Text, written)` 自然匹配；
-//! - files：watcher 把路径列表用 `\n` 连接后哈希，与我们 `item.content` 一致；
-//! - image：watcher 把 PNG 字节再 sha256 → 文件名 → 哈希。前提是 OS pasteboard 不改像素，
-//!   且 clipboard-rs 的 PNG 重新编码确定。绝大多数复制路径满足，极端情况可能漏抑制一次（最多多入一条新行）。
-//!
-//! 纯文本模式（`plain = true`）：忽略 `sub_kind`，写 `search_text`（OS 提供的纯文本表示），
-//! 缺失时退回 `content`。供「纯文本粘贴」快捷路径使用。
-
-use clipboard_rs::common::RustImage;
-use clipboard_rs::{Clipboard, ClipboardContent, ClipboardContext, RustImageData};
+//! Legacy Tauri adapter for the shared clipboard writer.
+use super::storage::ImageStore;
+use crate::core::Result;
+use crate::db::models::ClipboardItem;
+#[cfg(test)]
+use crate::db::{
+    items::content_hash,
+    models::{ClipboardKind, ClipboardSubKind},
+};
 use ecopaste_neo_core::writeback::WritebackGuard;
 
-use super::storage::ImageStore;
-use crate::core::{AppError, Result};
-use crate::db::items::content_hash;
-use crate::db::models::{ClipboardItem, ClipboardKind, ClipboardSubKind};
-
-/// 把 `item` 写回系统剪贴板；`plain = true` 强制只写纯文本（剥离 HTML/RTF）。
+/// Write full content using the same formats and suppression as the native app.
 pub fn write_to_clipboard(
     store: &ImageStore,
     guard: &WritebackGuard,
     item: &ClipboardItem,
     plain: bool,
 ) -> Result<()> {
-    let ctx = ClipboardContext::new().map_err(clip_err)?;
-
-    match item.kind {
-        ClipboardKind::Text => write_text(&ctx, guard, item, plain)?,
-        ClipboardKind::Image => write_image(&ctx, store, guard, item)?,
-        // files + plain：把路径列表当文本写回，供「粘贴为路径」使用。
-        ClipboardKind::Files if plain => write_files_as_text(&ctx, guard, item)?,
-        ClipboardKind::Files => write_files(&ctx, guard, item)?,
-    }
-    Ok(())
-}
-
-fn write_text(
-    ctx: &ClipboardContext,
-    guard: &WritebackGuard,
-    item: &ClipboardItem,
-    plain: bool,
-) -> Result<()> {
-    // 纯文本模式下，OS 提供的 plain 表示优先；缺失时退回 content（plain 文本场景下 content 即纯文本）。
-    let (content, sub_kind) = if plain {
-        let text = item
-            .search_text
-            .clone()
-            .unwrap_or_else(|| item.content.clone());
-        (text, None)
-    } else {
-        (item.content.clone(), item.sub_kind)
-    };
-
-    guard.suppress(content_hash(ClipboardKind::Text, &content));
-
-    match sub_kind {
-        // 纯文本模式必须只写 Text flavor，确保清掉剪贴板中可能残留的 HTML/RTF。
-        None if plain => ctx
-            .set(vec![ClipboardContent::Text(content)])
-            .map_err(clip_err)?,
-        // HTML / RTF 必须同时写入纯文本回退：clipboard-rs 的 set_html / set_rich_text
-        // 会先 clearContents，单独写时只剩富格式，多数应用读 plain/text 拿不到就拒绝粘贴。
-        // 走 set(Vec<ClipboardContent>) 一次写多格式（内部不再相互清空）。
-        Some(ClipboardSubKind::Html) => {
-            let plain = item.search_text.clone().unwrap_or_else(|| content.clone());
-            guard.suppress(content_hash(ClipboardKind::Text, &plain));
-            ctx.set(vec![
-                ClipboardContent::Text(plain),
-                ClipboardContent::Html(content),
-            ])
-            .map_err(clip_err)?;
-        }
-        Some(ClipboardSubKind::Rtf) => {
-            let plain = item.search_text.clone().unwrap_or_else(|| content.clone());
-            guard.suppress(content_hash(ClipboardKind::Text, &plain));
-            ctx.set(vec![
-                ClipboardContent::Text(plain),
-                ClipboardContent::Rtf(content),
-            ])
-            .map_err(clip_err)?;
-        }
-        // url / email / color / path 及无 sub_kind 都走纯文本通道。
-        _ => ctx.set_text(content).map_err(clip_err)?,
-    }
-    Ok(())
-}
-
-fn write_image(
-    ctx: &ClipboardContext,
-    store: &ImageStore,
-    guard: &WritebackGuard,
-    item: &ClipboardItem,
-) -> Result<()> {
-    let path = store.origin_path(&item.content);
-    let bytes = std::fs::read(&path).map_err(|err| {
-        log::error!("read image {path:?} failed: {err}");
-        AppError::Clipboard(err.to_string())
-    })?;
-    let image = RustImageData::from_bytes(&bytes).map_err(clip_err)?;
-
-    guard.suppress(item.content_hash.clone());
-    ctx.set_image(image).map_err(clip_err)?;
-    Ok(())
-}
-
-fn write_files(ctx: &ClipboardContext, guard: &WritebackGuard, item: &ClipboardItem) -> Result<()> {
-    let paths: Vec<String> = item
-        .content
-        .split('\n')
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect();
-    if paths.is_empty() {
-        return Err(AppError::Clipboard("no files to write".to_owned()));
-    }
-
-    guard.suppress(item.content_hash.clone());
-    ctx.set_files(paths).map_err(clip_err)?;
-    Ok(())
-}
-
-/// 把 files 条目的路径列表当文本写回（换行分隔，多文件按行展开）。
-/// 与 `write_files` 共用 `content_hash` 抑制——OS 监听不会拿到与原文本完全一致的回环。
-fn write_files_as_text(
-    ctx: &ClipboardContext,
-    guard: &WritebackGuard,
-    item: &ClipboardItem,
-) -> Result<()> {
-    let text = item.content.clone();
-
-    guard.suppress(content_hash(ClipboardKind::Text, &text));
-    ctx.set_text(text).map_err(clip_err)?;
-    Ok(())
-}
-
-fn clip_err<E: std::fmt::Display>(err: E) -> AppError {
-    AppError::Clipboard(err.to_string())
+    Ok(ecopaste_neo_core::clipboard::write::write_to_clipboard(
+        store, guard, item, plain,
+    )?)
 }
 
 #[cfg(test)]

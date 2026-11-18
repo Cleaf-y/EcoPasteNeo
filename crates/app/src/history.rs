@@ -60,6 +60,64 @@ impl HistorySource {
         &self.paths
     }
 
+    /// Fetch full content by ID; list summaries must never reach the writer.
+    pub fn prepare_write(
+        &self,
+        id: String,
+        plain: bool,
+    ) -> tokio::task::JoinHandle<Result<ecopaste_neo_core::clipboard::write::PreparedWrite>> {
+        let pool = self.pool.clone();
+        let store = ecopaste_neo_core::clipboard::ImageStore::new(&self.paths);
+        self.runtime.spawn(async move {
+            let item = db::items::find_item_by_id(&pool, &id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("History item no longer exists"))?;
+            tokio::task::spawn_blocking(move || {
+                Ok(ecopaste_neo_core::clipboard::write::PreparedWrite::new(
+                    &store, &item, plain,
+                )?)
+            })
+            .await?
+        })
+    }
+
+    /// Keep the listener separate from database work and notify only after commit.
+    pub fn start_capture(
+        &self,
+        guard: Arc<ecopaste_neo_core::writeback::WritebackGuard>,
+    ) -> Result<CaptureSession> {
+        use ecopaste_neo_core::clipboard::{self, CaptureSettings, ImageStore};
+        let (send, mut receive) = tokio::sync::mpsc::channel(16);
+        let (updates, events) = std::sync::mpsc::sync_channel(32);
+        let errors = updates.clone();
+        let watcher = clipboard::native::start_watcher(
+            ImageStore::new(&self.paths),
+            guard,
+            || Some(CaptureSettings::default()),
+            move |result| {
+                if send.try_send(result).is_err() {
+                    let _ = errors.try_send(false);
+                }
+            },
+        )?;
+        let pool = self.pool.clone();
+        let worker = self.runtime.spawn(async move {
+            while let Some(prepared) = receive.recv().await {
+                let success = match prepared {
+                    Ok(prepared) => clipboard::persist_capture(&pool, &prepared).await.is_ok(),
+                    Err(_) => false,
+                };
+                let _ = updates.try_send(success);
+            }
+        });
+        Ok(CaptureSession {
+            watcher: Some(watcher),
+            worker: Some(worker),
+            runtime: self.runtime.clone(),
+            events,
+        })
+    }
+
     /// SQL and filesystem preparation run outside the UI executor.
     pub fn query(
         &self,
@@ -248,6 +306,7 @@ mod database_tests {
             environment: Environment::Dev,
             locale: Locale::ZhCn,
             show: false,
+            capture: false,
         };
         let source = HistorySource::open(&options).unwrap();
         source.runtime.block_on(async {
@@ -288,6 +347,25 @@ mod database_tests {
             55
         );
         assert!(state.begin().is_none());
+        let prepared = source
+            .runtime
+            .block_on(source.prepare_write("0054".into(), false))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            prepared.payload,
+            ecopaste_neo_core::clipboard::write::WritePayload::Text {
+                plain: "text 54".into(),
+                rich: None
+            }
+        );
+        assert!(
+            source
+                .runtime
+                .block_on(source.prepare_write("missing".into(), false))
+                .unwrap()
+                .is_err()
+        );
         let database = source.paths.db_path();
         source.runtime.block_on(source.pool.close());
         drop(source);
@@ -308,5 +386,23 @@ mod database_tests {
         assert_eq!(empty.total, 0);
         assert!(!empty.has_more);
         reopened.runtime.block_on(reopened.pool.close());
+    }
+}
+
+/// Session lifetime owns both native resources and the persistence consumer.
+pub struct CaptureSession {
+    watcher: Option<ecopaste_neo_core::clipboard::native::WatcherHandle>,
+    worker: Option<tokio::task::JoinHandle<()>>,
+    runtime: Arc<Runtime>,
+    pub events: std::sync::mpsc::Receiver<bool>,
+}
+
+impl Drop for CaptureSession {
+    fn drop(&mut self) {
+        self.watcher.take();
+        // Stopping the watcher closes its sender; drain accepted copies before exit.
+        if let Some(worker) = self.worker.take() {
+            let _ = self.runtime.block_on(worker);
+        }
     }
 }

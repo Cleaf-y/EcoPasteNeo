@@ -11,6 +11,7 @@ pub mod settings;
 #[cfg(feature = "system-clipboard")]
 pub mod source;
 mod storage;
+pub mod write;
 
 pub use ingest::{build_item_with_settings, SUMMARY_MAX_CHARS};
 pub use storage::ImageStore;

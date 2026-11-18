@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use ecopaste_neo_app::{
-    history::{HistorySource, HistoryState},
+    history::{CaptureSession, HistorySource, HistoryState},
     locale::Locale,
 };
 use ecopaste_neo_core::{db::models::ClipboardKind, identity::PRODUCT_NAME};
@@ -15,7 +15,11 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
 };
 
-use super::native::Panel;
+use super::{
+    native::{self, Panel},
+    paste,
+};
+use ecopaste_neo_core::writeback::WritebackGuard;
 
 pub struct HistoryPanel {
     input: Entity<InputState>,
@@ -26,6 +30,15 @@ pub struct HistoryPanel {
     locale: Locale,
     visible: bool,
     request: Option<Task<()>>,
+    capture: Option<CaptureSession>,
+    guard: Arc<WritebackGuard>,
+    pinned: bool,
+    pasting: bool,
+    paste_task: Option<Task<()>>,
+    action_error: Option<String>,
+    target: Option<i32>,
+    interaction: u64,
+    refresh_pending: bool,
 }
 
 impl HistoryPanel {
@@ -33,6 +46,7 @@ impl HistoryPanel {
     pub fn new(
         source: HistorySource,
         locale: Locale,
+        capture_enabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -48,7 +62,7 @@ impl HistoryPanel {
         })
         .detach();
         cx.observe_window_activation(window, |this, window, cx| {
-            if !window.is_window_active() && this.visible {
+            if !window.is_window_active() && this.visible && !this.pinned && !this.pasting {
                 this.hide(cx);
             }
         })
@@ -65,6 +79,15 @@ impl HistoryPanel {
         });
         let mut state = HistoryState::default();
         state.reset(String::new());
+        let guard = Arc::new(WritebackGuard::new());
+        let (capture, action_error) = if capture_enabled {
+            match source.start_capture(guard.clone()) {
+                Ok(capture) => (Some(capture), None),
+                Err(_) => (None, Some(locale.capture_failed().to_owned())),
+            }
+        } else {
+            (None, None)
+        };
         let mut view = Self {
             input,
             panel,
@@ -74,6 +97,15 @@ impl HistoryPanel {
             locale,
             visible: false,
             request: None,
+            capture,
+            guard,
+            pinned: false,
+            pasting: false,
+            paste_task: None,
+            action_error,
+            target: None,
+            interaction: 0,
+            refresh_pending: false,
         };
         view.load_more(false, cx);
         view
@@ -84,15 +116,131 @@ impl HistoryPanel {
     }
 
     pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.interaction += 1;
+        self.target = native::frontmost_pid();
         self.visible = true;
+        if self.refresh_pending {
+            self.refresh(cx);
+        }
         self.panel.show();
         self.input.update(cx, |input, cx| input.focus(window, cx));
         cx.notify();
     }
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
+        self.interaction += 1;
         self.visible = false;
         self.panel.hide();
+        cx.notify();
+    }
+
+    /// Coalesce committed updates; hidden panels refresh on their next show.
+    pub fn poll_capture(&mut self, cx: &mut Context<Self>) {
+        if let Some(capture) = &self.capture {
+            while let Ok(success) = capture.events.try_recv() {
+                if success {
+                    self.refresh_pending = true;
+                } else {
+                    self.action_error = Some(self.locale.capture_failed().to_owned());
+                    cx.notify();
+                }
+            }
+        }
+        if self.refresh_pending && self.visible && !self.pasting && !self.state.loading {
+            self.refresh(cx);
+        }
+    }
+
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.refresh_pending = false;
+        self.state.reset(self.state.keyword.clone());
+        self.list.reset(0);
+        self.load_more(false, cx);
+    }
+
+    /// Resolve the selected ID on the worker, then perform native steps on the UI thread.
+    fn paste_selected(&mut self, plain: bool, cx: &mut Context<Self>) {
+        if self.pasting {
+            return;
+        }
+        let Some(row) = self.state.rows.get(self.state.selected) else {
+            return;
+        };
+        if let Err(error) = paste::check_permission(self.locale) {
+            self.action_error = Some(error.to_string());
+            cx.notify();
+            return;
+        }
+        let Some(target) = self
+            .target
+            .filter(|pid| Some(*pid) == native::frontmost_pid())
+        else {
+            self.action_error = Some(self.locale.target_missing().into());
+            cx.notify();
+            return;
+        };
+        let prepared = self.source.prepare_write(row.item.id.clone(), plain);
+        let session = self.interaction;
+        self.pasting = true;
+        self.action_error = None;
+        let executor = cx.background_executor().clone();
+        self.paste_task = Some(cx.spawn(async move |this, cx| {
+            let prepared = prepared.await;
+            let ready = this.update(cx, |this, cx| -> anyhow::Result<bool> {
+                if !this.visible || session != this.interaction {
+                    return Ok(false);
+                }
+                paste::check_permission(this.locale)?;
+                anyhow::ensure!(
+                    native::frontmost_pid() == Some(target),
+                    "{}",
+                    this.locale.target_missing()
+                );
+                let write = prepared??;
+                write.write(&this.guard)?;
+                if this.pinned {
+                    this.panel.resign_key();
+                } else {
+                    this.hide(cx);
+                }
+                Ok(true)
+            });
+            let result = match ready {
+                Ok(Ok(true)) => {
+                    executor.timer(Duration::from_millis(70)).await;
+                    this.update(cx, |this, _| -> anyhow::Result<()> {
+                        // A newly reopened panel or a changed target cancels the pending key event.
+                        anyhow::ensure!(
+                            this.pinned || !this.visible,
+                            "{}",
+                            this.locale.target_missing()
+                        );
+                        anyhow::ensure!(
+                            native::frontmost_pid() == Some(target),
+                            "{}",
+                            this.locale.target_missing()
+                        );
+                        paste::check_permission(this.locale)?;
+                        paste::simulate_paste()
+                    })
+                    .unwrap_or_else(Err)
+                }
+                Ok(Ok(false)) => Ok(()),
+                Ok(Err(error)) => Err(error),
+                Err(error) => Err(error),
+            };
+            executor.timer(Duration::from_millis(70)).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.pinned && this.visible && native::frontmost_pid() == Some(target) {
+                    this.panel.restore_key();
+                }
+                this.pasting = false;
+                if let Err(error) = result {
+                    this.action_error = Some(format!("{}: {error}", this.locale.paste_failed()));
+                }
+                cx.notify();
+            });
+        }));
         cx.notify();
     }
 
@@ -152,6 +300,10 @@ impl HistoryPanel {
                 }
                 cx.stop_propagation();
                 cx.notify();
+            }
+            "enter" => {
+                self.paste_selected(event.keystroke.modifiers.shift, cx);
+                cx.stop_propagation();
             }
             "escape" => {
                 self.hide(cx);
@@ -217,11 +369,11 @@ impl HistoryPanel {
             .child(header);
         match row.item.kind {
             ClipboardKind::Text => {
-                card = card.child(
-                    div()
-                        .whitespace_normal()
-                        .child(row.item.summary.clone().unwrap_or_default()),
-                );
+                card = card.child(div().whitespace_normal().child(if row.item.is_sensitive {
+                    "••••••••".to_owned()
+                } else {
+                    row.item.summary.clone().unwrap_or_default()
+                }));
             }
             ClipboardKind::Image => {
                 let width = row.item.width.unwrap_or(1).max(1) as f32;
@@ -295,6 +447,7 @@ impl HistoryPanel {
             .child(card.on_click(cx.listener(move |this, _, window, cx| {
                 this.state.selected = index;
                 this.input.update(cx, |input, cx| input.focus(window, cx));
+                this.paste_selected(false, cx);
                 cx.notify();
             })))
             .into_any_element()
@@ -361,6 +514,37 @@ impl Render for HistoryPanel {
                     .on_click(cx.listener(|this, _, _, cx| this.load_more(false, cx))),
             );
         }
+        let controls = div()
+            .flex()
+            .gap_3()
+            .child(
+                div()
+                    .id("pin-panel")
+                    .cursor_pointer()
+                    .child(if self.pinned {
+                        locale.unpin_panel()
+                    } else {
+                        locale.pin_panel()
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pinned = !this.pinned;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                div()
+                    .id("paste-plain")
+                    .cursor_pointer()
+                    .child(locale.paste_plain())
+                    .on_click(cx.listener(|this, _, _, cx| this.paste_selected(true, cx))),
+            )
+            .child(
+                div()
+                    .id("paste-selected")
+                    .cursor_pointer()
+                    .child(locale.paste())
+                    .on_click(cx.listener(|this, _, _, cx| this.paste_selected(false, cx))),
+            );
         div()
             .id("history-panel")
             .size_full()
@@ -385,7 +569,8 @@ impl Render for HistoryPanel {
                             .child(div().text_lg().font_semibold().child(PRODUCT_NAME))
                             .child(div().text_xs().text_color(muted).child(locale.hint())),
                     )
-                    .child(Input::new(&self.input).cleanable(true)),
+                    .child(Input::new(&self.input).cleanable(true))
+                    .child(controls),
             )
             .child(body)
             .when(self.state.error.is_some(), |view| {
@@ -394,6 +579,15 @@ impl Render for HistoryPanel {
                     locale.failed(),
                     self.state.error.as_deref().unwrap_or_default()
                 )))
+            })
+            .when(self.action_error.is_some(), |view| {
+                view.child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .text_color(theme.danger)
+                        .child(self.action_error.clone().unwrap_or_default()),
+                )
             })
             .child(footer)
     }

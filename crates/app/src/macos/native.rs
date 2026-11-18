@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow, bail};
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow};
+use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow, NSWorkspace};
 use objc2_foundation::{NSMouseInRect, NSPoint};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
@@ -66,7 +66,23 @@ impl Panel {
         window.makeKeyAndOrderFront(None);
     }
 
+    /// Give keys back to the still-active target without activating any application.
+    pub fn resign_key(&self) {
+        self.native().resignKeyWindow();
+    }
+
+    pub fn restore_key(&self) {
+        self.native().makeKeyWindow();
+    }
+
     pub fn hide(&self) {
         self.native().orderOut(None);
     }
+}
+
+/// Nonactivating panels keep the external application's process frontmost.
+pub fn frontmost_pid() -> Option<i32> {
+    let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+    let pid = app.processIdentifier();
+    (pid != std::process::id() as i32).then_some(pid)
 }

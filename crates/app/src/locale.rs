@@ -22,10 +22,40 @@ impl Locale {
     pub fn search(self) -> &'static str {
         self.text("搜索历史记录", "Search history")
     }
+    pub fn paste(self) -> &'static str {
+        self.text("粘贴", "Paste")
+    }
+    pub fn paste_plain(self) -> &'static str {
+        self.text("纯文本粘贴", "Paste plain")
+    }
+    pub fn pin_panel(self) -> &'static str {
+        self.text("固定窗口", "Keep open")
+    }
+    pub fn unpin_panel(self) -> &'static str {
+        self.text("取消固定", "Unpin window")
+    }
+    pub fn permission_required(self) -> &'static str {
+        self.text("请在系统设置 → 隐私与安全性 → 辅助功能中授权此应用，然后重试", "Allow this application in System Settings → Privacy & Security → Accessibility, then retry")
+    }
+    pub fn target_missing(self) -> &'static str {
+        self.text(
+            "请先将光标放到目标应用，再唤出面板",
+            "Place the cursor in the target application, then show the panel",
+        )
+    }
+    pub fn capture_failed(self) -> &'static str {
+        self.text(
+            "剪贴板捕获或保存失败",
+            "Could not capture or save clipboard content",
+        )
+    }
+    pub fn paste_failed(self) -> &'static str {
+        self.text("粘贴失败", "Paste failed")
+    }
     pub fn hint(self) -> &'static str {
         self.text(
-            "⌃⌥⌘V 唤出 · ↑↓ 选择 · Esc 隐藏",
-            "⌃⌥⌘V Show · ↑↓ Select · Esc Hide",
+            "⌃⌥⌘V 唤出 · ↑↓ 选择 · Enter 粘贴 · Esc 隐藏",
+            "⌃⌥⌘V Show · ↑↓ Select · Enter Paste · Esc Hide",
         )
     }
     pub fn loading(self) -> &'static str {

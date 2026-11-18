@@ -3,6 +3,7 @@
 set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
+target_dir="${CARGO_TARGET_DIR:-$repo_dir/target}"
 build=true
 test_data_parent=""
 while [[ $# -gt 0 ]]; do
@@ -17,9 +18,9 @@ if [[ $# -ne 0 || "$(uname -s)" != Darwin ]]; then
   printf 'Run on macOS: %s [--no-build] [--test-data-parent PATH]\n' "$0" >&2; exit 2
 fi
 if [[ "$build" == true ]]; then
-  cargo build -p ecopaste-neo-app --bin EcoPasteNeo --locked --target-dir "$repo_dir/target"
+  cargo build -p ecopaste-neo-app --bin EcoPasteNeo --locked --target-dir "$target_dir"
 fi
-binary="$repo_dir/target/debug/EcoPasteNeo"
+binary="$target_dir/debug/EcoPasteNeo"
 bundle="$repo_dir/dist/EcoPasteNeo.app"
 if [[ ! -x "$binary" ]]; then
   printf 'Missing executable: %s\n' "$binary" >&2; exit 1

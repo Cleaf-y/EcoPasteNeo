@@ -469,9 +469,12 @@ fn should_write_plain_for_paste(
     paste_plain: bool,
     paste_files_as_path: bool,
 ) -> bool {
-    force_plain
-        || kind == ClipboardKind::Text && paste_plain
-        || kind == ClipboardKind::Files && paste_files_as_path
+    ecopaste_neo_core::clipboard::write::should_write_plain_for_paste(
+        force_plain,
+        kind,
+        paste_plain,
+        paste_files_as_path,
+    )
 }
 
 /// 按设置决定是否把复制 / 粘贴历史记录计为一次复用。

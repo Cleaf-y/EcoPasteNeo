@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-ecopaste-neo-core = { path = "../core", features = ["preview"] }
+ecopaste-neo-core = { path = "../core", features = ["preview", "system-clipboard"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 
@@ -24,6 +24,7 @@ objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
 raw-window-handle = "0.6"
+core-graphics = "0.24"
 global-hotkey = "0.7"
 tray-icon = "0.21"
 
