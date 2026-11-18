@@ -16,6 +16,17 @@ impl From<ecopaste_neo_core::db::DatabaseError> for AppError {
     }
 }
 
+impl From<ecopaste_neo_core::clipboard::CaptureError> for AppError {
+    fn from(error: ecopaste_neo_core::clipboard::CaptureError) -> Self {
+        match error {
+            ecopaste_neo_core::clipboard::CaptureError::Clipboard(message) => {
+                Self::Clipboard(message)
+            }
+            error => Self::Other(error.into()),
+        }
+    }
+}
+
 impl AppError {
     fn kind(&self) -> &'static str {
         match self {

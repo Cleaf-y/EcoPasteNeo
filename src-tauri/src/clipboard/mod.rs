@@ -6,7 +6,6 @@ mod icon;
 mod ingest;
 mod payload;
 mod read;
-mod secrets;
 mod sound;
 mod source;
 mod storage;

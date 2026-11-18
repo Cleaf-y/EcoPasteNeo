@@ -16,6 +16,12 @@ Windows 剪贴板变更通知可能早于其他程序释放剪贴板。监听器
 
 文本子类型识别与颜色预览校验共用 `crates/core` 的 `content` 模块，判定顺序为 URL、邮箱、颜色、本机存在的绝对路径。`ClipboardSubKind` 也由该模块定义，JSON 与 SQLite 值保持小写；旧应用通过 core 的 `sqlx` feature 启用数据库适配，不再单独维护识别正则或子类型枚举。
 
+捕获载荷、`Capture` / `CaptureKind` / `Sensitive` / `Filters` 设置、敏感检测、图片原图和缩略图实现统一在 [`crates/core/src/clipboard/`](../crates/core/src/clipboard/)。默认 `capture` feature 提供纯载荷转换与持久化，`system-clipboard` feature 才引入原生读取器、来源探测和监听入口；测试构造载荷，不操作系统剪贴板。设置字段、默认值、优先级及敏感内容的“收录与标记、显示时脱敏”语义保持原样。
+
+Neo 使用 `ImageStore::new(&DataPaths)`，原图和懒生成的缩略图都位于已确认身份的 Neo 资源目录。旧 Tauri 的 `ImageStore` 只适配原数据目录与热切换，实际图片操作委托 core，不把旧目录切换为 Neo 目录。`db::items::upsert_item` 在同一写事务中判重并写入，避免手动读取与监听同时到达时重复插入；数据库结构及已发布迁移不变。
+
+正式面板接入时，保留 `native::start_watcher` 返回的 `WatcherHandle`，退出时释放以停止监听。监听器在自己的线程创建原生句柄，先记录来源并检查排除应用，再同步读取、应用当前 `CaptureSettings` 和 `WritebackGuard`，只向接收方投递拥有所有权的 `PreparedCapture`；设置回调返回 `None` 时暂停读取。接收方排队处理，每次取当前数据库池后调用 `persist_capture`，成功得到 `CaptureUpdate` 后再通知面板重新查询；不要在监听回调中等待数据库或缓存旧池。手动读取使用 `native::read_capture` 和同一个 `persist_capture`。core 不调用 `AppHandle` 或 `emit`；旧 Tauri 的 `persist_and_notify` 委托同一持久化实现，随后沿用原提示音和 `clipboard://updated` 通知。
+
 实现入口：[内容识别](../crates/core/src/content.rs)、[写回抑制规则](../crates/core/src/writeback.rs)、[监听器](../src-tauri/src/clipboard/watcher.rs)、[写回](../src-tauri/src/clipboard/write.rs)、[命令](../src-tauri/src/commands/clipboard.rs)。从仓库根目录运行 `cargo test -p ecopaste-neo-core` 即可验证内容识别与写回抑制，无需 Tauri、GPUI 或系统剪贴板。现有桌面应用仍用 `src-tauri/Cargo.toml` 和原锁文件构建。
 
 ## 数据库、资源目录与备份

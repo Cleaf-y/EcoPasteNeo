@@ -1,5 +1,7 @@
 //! History reads shared by the Neo application and the existing Tauri adapter.
 
+use blake3::Hasher;
+use chrono::Utc;
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use super::models::{
@@ -260,6 +262,115 @@ fn push_filter_clauses(
         qb.push(" AND clipboard_items.is_pinned = ")
             .push_bind(pinned);
     }
+}
+
+/// 入库去重的结果：`id` 为生效行的主键（命中时是已有行，未命中时是新插入行），
+/// `deduplicated` 表示是否命中了已有内容（命中则只 `use_count + 1` 未插入新行）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpsertResult {
+    pub id: String,
+    pub deduplicated: bool,
+}
+
+/// 计算去重指纹：`blake3("<kind>:<content>")`。
+/// 加 `kind` 前缀，避免 text 与 files 恰好同串内容被误判为重复。
+/// text 直接哈希内容串即可；image/files 的 `content` 是落盘引用/路径，
+/// 调用方持有原始字节时可改为对原始内容字节哈希后写入 `content_hash`。
+pub fn content_hash(kind: ClipboardKind, content: &str) -> String {
+    let mut hasher = Hasher::new();
+    hasher.update(kind_tag(kind).as_bytes());
+    hasher.update(b":");
+    hasher.update(content.as_bytes());
+    hasher.finalize().to_hex().to_string()
+}
+
+fn kind_tag(kind: ClipboardKind) -> &'static str {
+    match kind {
+        ClipboardKind::Text => "text",
+        ClipboardKind::Image => "image",
+        ClipboardKind::Files => "files",
+    }
+}
+
+/// 入库主入口：按 `item.content_hash` 去重。
+/// 在同一写事务中查询哈希并累加使用次数或插入，返回生效行 id 与是否去重。
+pub async fn upsert_item(pool: &SqlitePool, item: &ClipboardItem) -> Result<UpsertResult> {
+    // Manual reads can overlap listener captures. Reserve the writer before checking
+    // the hash so the two callers cannot both insert the same clipboard content.
+    let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM clipboard_items WHERE content_hash = ? ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(&item.content_hash)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let result = if let Some(id) = existing {
+        increment_query(&id).execute(&mut *transaction).await?;
+        UpsertResult {
+            id,
+            deduplicated: true,
+        }
+    } else {
+        insert_query(item).execute(&mut *transaction).await?;
+        UpsertResult {
+            id: item.id.clone(),
+            deduplicated: false,
+        }
+    };
+    transaction.commit().await?;
+    Ok(result)
+}
+
+/// 插入一条剪贴板记录（不做去重；去重请走 [`upsert_item`]）。
+pub async fn insert_item(pool: &SqlitePool, item: &ClipboardItem) -> Result<()> {
+    insert_query(item).execute(pool).await?;
+    Ok(())
+}
+
+/// One INSERT definition for both direct writes and transactional deduplication.
+fn insert_query(
+    item: &ClipboardItem,
+) -> sqlx::query::Query<'_, Sqlite, sqlx::sqlite::SqliteArguments> {
+    sqlx::query(
+        "INSERT INTO clipboard_items \
+         (id, kind, sub_kind, group_id, source_app_id, content, content_hash, search_text, \
+          summary, file_types, size, width, height, use_count, is_favorite, is_pinned, is_sensitive, platform, note, \
+          created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(item.id.as_str())
+    .bind(item.kind)
+    .bind(item.sub_kind)
+    .bind(item.group_id.as_deref())
+    .bind(item.source_app_id.as_deref())
+    .bind(item.content.as_str())
+    .bind(item.content_hash.as_str())
+    .bind(item.search_text.as_deref())
+    .bind(item.summary.as_deref())
+    .bind(item.file_types.as_deref())
+    .bind(item.size)
+    .bind(item.width)
+    .bind(item.height)
+    .bind(item.use_count)
+    .bind(item.is_favorite)
+    .bind(item.is_pinned)
+    .bind(item.is_sensitive)
+    .bind(item.platform)
+    .bind(item.note.as_deref())
+    .bind(item.created_at)
+    .bind(item.updated_at)
+}
+
+/// `use_count + 1` 并刷新 `updated_at`（命中去重时复用）。
+pub async fn increment_item_use_count(pool: &SqlitePool, id: &str) -> Result<()> {
+    increment_query(id).execute(pool).await?;
+    Ok(())
+}
+
+fn increment_query(id: &str) -> sqlx::query::Query<'_, Sqlite, sqlx::sqlite::SqliteArguments> {
+    sqlx::query("UPDATE clipboard_items SET use_count = use_count + 1, updated_at = ? WHERE id = ?")
+        .bind(Utc::now())
+        .bind(id)
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(test)]
 use std::time::Duration;
 
 use chrono::Utc;
@@ -26,41 +27,19 @@ use super::read::ClipboardReader;
 use super::sound;
 use super::source::{self, FrontmostApp};
 use super::storage::ImageStore;
-use crate::db::apps::upsert_app;
-use crate::db::items::{upsert_item, UpsertResult};
+#[cfg(test)]
+use crate::db::items::upsert_item;
+use crate::db::items::UpsertResult;
 use crate::db::models::{ClipboardApp, ClipboardItem};
 use crate::settings::SettingsStore;
 
 /// 剪贴板更新事件名。前端监听此事件后增量刷新 / 重新拉取列表。
 pub const CLIPBOARD_UPDATED_EVENT: &str = "clipboard://updated";
 
-/// macOS 轮询 `changeCount` 的间隔。上游 clipboard-rs 默认 500ms，对复制响应（尤其图片）
-/// 偏慢；我们 fork 出 `new_with_interval` 后调到 120ms，跟手且 CPU 开销可忽略。
-/// Windows 走事件驱动（`WM_CLIPBOARDUPDATE`），此值被忽略。
-const CLIPBOARD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(120);
-
-/// Another clipboard listener can briefly hold the Windows clipboard open. Retry those read
-/// failures within a bounded window before dropping the update.
-const CLIPBOARD_READ_RETRY_DELAYS: [Duration; 3] = [
-    Duration::from_millis(15),
-    Duration::from_millis(35),
-    Duration::from_millis(75),
-];
-
-fn read_with_retry<T, E>(
-    retry_delays: &[Duration],
-    mut read: impl FnMut() -> Result<Option<T>, E>,
-) -> Result<Option<T>, E> {
-    let mut result = read();
-    for delay in retry_delays {
-        if result.is_ok() {
-            return result;
-        }
-        std::thread::sleep(*delay);
-        result = read();
-    }
-    result
-}
+use ecopaste_neo_core::clipboard::native::{
+    read_with_retry, POLL_INTERVAL as CLIPBOARD_POLL_INTERVAL,
+    READ_RETRY_DELAYS as CLIPBOARD_READ_RETRY_DELAYS,
+};
 
 /// 监听暂停开关。托盘菜单「停止监听」翻转，handler 早返回跳过整条入库链路。
 /// 用 `Arc<AtomicBool>` 跨线程共享；不停 watcher 线程本身，避免反复重建平台句柄。
@@ -120,7 +99,7 @@ pub fn materialize_source(
 }
 
 /// 去重入库 + emit「剪贴板更新」事件。监听回调与 `read_clipboard` 命令共用，
-/// 保证两条路径的入库语义与事件契约一致。失败仅记日志（监听场景无人接收 Result）。
+/// 保证两条路径的入库语义与通知协议一致。失败仅记日志（监听场景无人接收 Result）。
 ///
 /// `source_app` 为 `Some` 时先 upsert apps 表再写 item，满足 FK 约束。
 /// 应用 upsert 失败不阻断条目入库——清掉 source_app_id 后继续，避免单次系统调用抽风丢内容。
@@ -130,23 +109,13 @@ pub async fn persist_and_notify(
     item: &ClipboardItem,
     source_app: Option<&ClipboardApp>,
 ) -> crate::core::Result<UpsertResult> {
-    let mut item_to_write = item.clone();
-    if let Some(src) = source_app {
-        match upsert_app(pool, src).await {
-            Ok(()) => {}
-            Err(err) => {
-                log::warn!("clipboard source app upsert failed ({}): {err}", src.id);
-                item_to_write.source_app_id = None;
-            }
-        }
-    }
-    let result = upsert_item(pool, &item_to_write).await?;
+    let result = ecopaste_neo_core::clipboard::persist_item(pool, item, source_app).await?;
     sound::maybe_play_copy(app);
     if let Err(err) = app.emit(
         CLIPBOARD_UPDATED_EVENT,
         json!({
             "id": result.id,
-            "kind": item_to_write.kind,
+            "kind": item.kind,
             "deduplicated": result.deduplicated,
         }),
     ) {

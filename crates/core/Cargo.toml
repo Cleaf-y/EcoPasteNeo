@@ -6,10 +6,19 @@ license = "Apache-2.0"
 publish = false
 
 [features]
-default = ["sqlx"]
-sqlx = ["dep:sqlx", "dep:chrono"]
+default = ["capture"]
+sqlx = ["dep:sqlx", "dep:chrono", "dep:blake3"]
+
+capture = ["sqlx", "dep:anyhow", "dep:blake3", "dep:image", "dep:log", "dep:uuid"]
+system-clipboard = ["capture", "dep:clipboard-rs", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:winapi"]
 
 [dependencies]
+anyhow = { version = "1", optional = true }
+blake3 = { version = "1", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+log = { version = "0.4", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+clipboard-rs = { version = "0.3", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"], optional = true }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -20,3 +29,11 @@ thiserror = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication"], optional = true }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSURL"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "processthreadsapi", "handleapi", "winbase", "winnt", "minwindef", "windef"], optional = true }

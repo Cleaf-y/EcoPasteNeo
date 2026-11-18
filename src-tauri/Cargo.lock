@@ -1398,13 +1398,23 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "ecopaste-neo-core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "blake3",
  "chrono",
+ "clipboard-rs",
+ "image",
+ "log",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "regex",
  "serde",
  "serde_json",
  "sqlx",
  "tempfile",
  "thiserror 2.0.20",
+ "uuid",
+ "winapi",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 //! SQLite initialization and history queries, independent of either UI framework.
 
+pub mod apps;
 pub mod items;
 pub mod models;
 

@@ -3,7 +3,6 @@
 //! 应用改名或换图标时无需重建条目，引用方（`clipboard_items.source_app_id`）天然跟着更新。
 
 use anyhow::Context;
-use chrono::Utc;
 use sqlx::{QueryBuilder, Sqlite, SqlitePool};
 
 use crate::core::Result;
@@ -83,40 +82,7 @@ pub async fn delete_unreferenced_apps(pool: &SqlitePool, ids: &[String]) -> Resu
     Ok(deleted)
 }
 
-/// upsert：id 已存在则只刷新 name / icon_file / updated_at；不存在则全量插入。
-/// 显式分两路而非依赖 `INSERT OR REPLACE`：后者会重置 created_at 与（潜在的）外键级联。
-pub async fn upsert_app(pool: &SqlitePool, app: &ClipboardApp) -> Result<()> {
-    let now = Utc::now();
-    let updated = sqlx::query(
-        "UPDATE clipboard_apps SET name = ?, icon_file = ?, updated_at = ? WHERE id = ?",
-    )
-    .bind(app.name.as_str())
-    .bind(app.icon_file.as_deref())
-    .bind(now)
-    .bind(app.id.as_str())
-    .execute(pool)
-    .await
-    .context("failed to update clipboard app")?;
-
-    if updated.rows_affected() > 0 {
-        return Ok(());
-    }
-
-    sqlx::query(
-        "INSERT INTO clipboard_apps (id, name, icon_file, platform, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?)",
-    )
-    .bind(app.id.as_str())
-    .bind(app.name.as_str())
-    .bind(app.icon_file.as_deref())
-    .bind(app.platform)
-    .bind(app.created_at)
-    .bind(app.updated_at)
-    .execute(pool)
-    .await
-    .context("failed to insert clipboard app")?;
-    Ok(())
-}
+pub use ecopaste_neo_core::db::apps::upsert_app;
 
 #[cfg(test)]
 mod tests {

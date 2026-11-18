@@ -1,3 +1,5 @@
+#[cfg(feature = "capture")]
+pub mod clipboard;
 pub mod content;
 #[cfg(feature = "sqlx")]
 pub mod db;
