@@ -24,6 +24,10 @@ Windows 剪贴板变更通知可能早于其他程序释放剪贴板。监听器
 
 持久化根目录统一经 `core::paths` 解析。开发和发布数据分别位于 `dev/`、`prod/`；自定义根目录由启动配置 `storage.json` 与目录内的 `.ecopaste-storage.json` 标识共同确定。功能模块不要自行解析系统应用目录，绕过自定义目录设置。
 
+Neo 核心的正式身份统一在 [`crates/core/src/identity.rs`](../crates/core/src/identity.rs)：产品名 `EcoPasteNeo`、应用标识 `io.github.cleaf-y.ecopaste-neo`。新应用在打开 SQLite 或设置前调用 [`Storage::open`](../crates/core/src/paths.rs)，使用返回的 `DataPaths`；调用方传入不含应用标识的平台本地数据父目录（macOS 的 Application Support、Windows 的 LocalAppData），并明确选择 `Environment::Dev` 或 `Environment::Prod`。默认根目录为 `<平台父目录>/io.github.cleaf-y.ecopaste-neo/<dev|prod>`，`open_custom(parent)` 使用 `<parent>/EcoPasteNeoData/<dev|prod>` 并在默认根目录的 `storage.json` 保存选择。
+
+Neo 在创建数据库目录前验证 `.ecopasteneo-storage.json` 中的应用标识、格式版本和环境；只有新建/空目录可以创建标记。已有 Neo 标记原样保留。旧 `.ecopaste-storage.json` 不改名，不作为 Neo 身份；无 Neo 标记的非空目录、损坏或不匹配的元数据、已丢失的自定义目录均报错，不自动接管或回退到另一数据库。此模块不依赖 Tauri，旧 Tauri 配置和 `core::paths` 继续使用旧身份与目录规则。用临时目录运行 `cargo test -p ecopaste-neo-core --test storage_identity` 验证隔离，无需启动应用。
+
 运行中切换目录会暂停剪贴板监听、复制已知数据目录、替换数据库池，并同步设置和资源路径，最后广播设置及剪贴板刷新。修改其中一环时检查其余状态，避免数据库已切换但图片、图标或设置仍指向旧目录。
 
 搜索和分页由 Rust 返回最终结果。短关键词与 FTS5 搜索走不同查询，置顶优先于所选排序；前端使用返回的 `total`、`hasMore`，不要根据页大小猜测是否还有内容。
