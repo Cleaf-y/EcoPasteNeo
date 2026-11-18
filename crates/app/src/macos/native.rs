@@ -133,6 +133,28 @@ impl Panel {
         self.native().isKeyWindow()
     }
 
+    /// Run native tracking outside GPUI entity updates: AppKit dispatches nested events.
+    pub fn popup_menu(&self, menu: &tray_icon::menu::Menu, position: gpui::Point<gpui::Pixels>) {
+        use tray_icon::menu::{ContextMenu, dpi::LogicalPosition};
+        let view = self
+            .native()
+            .contentView()
+            .expect("GPUI window has a content view");
+        // SAFETY: GPUI keeps the NSView and window alive; this task runs on the main thread.
+        unsafe {
+            menu.show_context_menu_for_nsview(
+                (&*view as *const NSView).cast(),
+                Some(
+                    LogicalPosition::new(
+                        f64::from(f32::from(position.x)),
+                        f64::from(f32::from(position.y)),
+                    )
+                    .into(),
+                ),
+            );
+        }
+    }
+
     /// Give keys back to the still-active target without activating any application.
     pub fn resign_key(&self) {
         self.native().resignKeyWindow();

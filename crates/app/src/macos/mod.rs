@@ -1,3 +1,4 @@
+mod history_menu;
 mod native;
 mod panel;
 mod paste;
@@ -65,8 +66,11 @@ pub fn run() -> Result<()> {
         cx.spawn(async move |cx| {
             loop {
                 executor.timer(Duration::from_millis(25)).await;
-                let _ = handle.update(cx, |_, _, cx| {
-                    panel.update(cx, |view, cx| view.poll_capture(cx));
+                let _ = handle.update(cx, |_, window, cx| {
+                    panel.update(cx, |view, cx| {
+                        view.poll_capture(cx);
+                        view.poll_management(window, cx);
+                    });
                 });
                 while let Some(action) = integration.next_action() {
                     if matches!(action, SystemAction::Quit) {
@@ -79,6 +83,7 @@ pub fn run() -> Result<()> {
                                 SystemAction::Toggle if view.visible() => view.hide(cx),
                                 SystemAction::Toggle | SystemAction::Show => view.show(window, cx),
                                 SystemAction::Quit => unreachable!(),
+                                SystemAction::Menu(id) => view.handle_menu_event(&id, window, cx),
                             });
                         })
                         .is_err()

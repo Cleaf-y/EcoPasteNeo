@@ -23,6 +23,10 @@ use super::{
 };
 use ecopaste_neo_core::writeback::WritebackGuard;
 
+#[path = "record_management.rs"]
+mod record_management;
+use record_management::Management;
+
 pub struct HistoryPanel {
     input: Entity<InputState>,
     panel: Panel,
@@ -42,6 +46,7 @@ pub struct HistoryPanel {
     interaction: u64,
     refresh_pending: bool,
     preview: Option<PreviewWindow>,
+    management: Management,
 }
 
 impl HistoryPanel {
@@ -111,6 +116,7 @@ impl HistoryPanel {
             interaction: 0,
             refresh_pending: false,
             preview: None,
+            management: Management::default(),
         };
         view.load_more(false, cx);
         view
@@ -133,6 +139,7 @@ impl HistoryPanel {
     }
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
+        self.management.close();
         self.close_preview(false, cx);
         self.interaction += 1;
         self.visible = false;
@@ -167,7 +174,7 @@ impl HistoryPanel {
 
     /// Resolve the selected ID on the worker, then perform native steps on the UI thread.
     fn paste_selected(&mut self, plain: bool, cx: &mut Context<Self>) {
-        if self.pasting {
+        if self.pasting || self.management.blocks_list() {
             return;
         }
         let Some(row) = self.state.rows.get(self.state.selected) else {
@@ -258,6 +265,7 @@ impl HistoryPanel {
         if !self.visible
             || self.pinned
             || self.pasting
+            || self.management.tracks_menu()
             || self.panel.is_key()
             || self
                 .preview
@@ -282,7 +290,7 @@ impl HistoryPanel {
 
     /// Reuse one nonactivating child, leaving the saved external process untouched.
     fn open_preview(&mut self, cx: &mut Context<Self>) {
-        if self.pasting {
+        if self.pasting || self.management.blocks_list() {
             return;
         }
         let Some(id) = self
@@ -382,6 +390,9 @@ impl HistoryPanel {
 
     /// Leave navigation and Escape to the IME while marked text is present.
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.management_key_down(event, window, cx) {
+            return;
+        }
         if self.input.update(cx, |input, cx| {
             input.marked_text_range(window, cx).is_some()
         }) {
@@ -450,21 +461,20 @@ impl HistoryPanel {
             ClipboardKind::Image => locale.image(),
             ClipboardKind::Files => locale.files(),
         };
+        let mut labels = vec![kind];
+        if row.item.is_pinned {
+            labels.push(locale.pinned());
+        }
+        if row.item.is_favorite {
+            labels.push(locale.favorite());
+        }
         let header = div()
             .flex()
             .justify_between()
             .gap_2()
             .text_xs()
             .text_color(theme.muted_foreground)
-            .child(format!(
-                "{}{}",
-                kind,
-                if row.item.is_pinned {
-                    format!(" · {}", locale.pinned())
-                } else {
-                    String::new()
-                }
-            ))
+            .child(labels.join(" · "))
             .child(
                 div()
                     .flex()
@@ -593,15 +603,28 @@ impl HistoryPanel {
                     .child(note.clone()),
             );
         }
+        let menu_id = row.item.id.clone();
         div()
             .w_full()
             .px_3()
-            .child(card.on_click(cx.listener(move |this, _, window, cx| {
-                this.state.selected = index;
-                this.input.update(cx, |input, cx| input.focus(window, cx));
-                this.paste_selected(false, cx);
-                cx.notify();
-            })))
+            .child(
+                card.on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(move |this, event, _, cx| {
+                        cx.stop_propagation();
+                        this.popup_history_menu(&menu_id, event, cx);
+                    }),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if this.management.blocks_list() {
+                        return;
+                    }
+                    this.state.selected = index;
+                    this.input.update(cx, |input, cx| input.focus(window, cx));
+                    this.paste_selected(false, cx);
+                    cx.notify();
+                })),
+            )
             .into_any_element()
     }
 }
@@ -609,8 +632,30 @@ impl HistoryPanel {
 impl Render for HistoryPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let locale = self.locale;
+        let dialog = self.render_record_dialog(cx);
         let theme = cx.theme();
         let muted = theme.muted_foreground;
+        let root = div()
+            .id("history-panel")
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .text_sm()
+            .capture_key_down(cx.listener(Self::key_down));
+        if let Some(dialog) = dialog {
+            return root
+                .child(dialog)
+                .when(self.action_error.is_some(), |view| {
+                    view.child(
+                        div()
+                            .px_4()
+                            .text_color(cx.theme().danger)
+                            .child(self.action_error.clone().unwrap_or_default()),
+                    )
+                });
+        }
         let weak = cx.entity().downgrade();
         let mut body = div().flex_1().min_h_0().w_full();
         if self.state.rows.is_empty() {
@@ -704,51 +749,42 @@ impl Render for HistoryPanel {
                     .child(locale.paste())
                     .on_click(cx.listener(|this, _, _, cx| this.paste_selected(false, cx))),
             );
-        div()
-            .id("history-panel")
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .text_sm()
-            .capture_key_down(cx.listener(Self::key_down))
-            .child(
+        root.child(
+            div()
+                .px_4()
+                .pt_4()
+                .pb_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .child(div().text_lg().font_semibold().child(PRODUCT_NAME))
+                        .child(div().text_xs().text_color(muted).child(locale.hint())),
+                )
+                .child(Input::new(&self.input).cleanable(true))
+                .child(controls),
+        )
+        .child(body)
+        .when(self.state.error.is_some(), |view| {
+            view.child(div().px_4().py_2().text_color(theme.danger).child(format!(
+                "{}: {}",
+                locale.failed(),
+                self.state.error.as_deref().unwrap_or_default()
+            )))
+        })
+        .when(self.action_error.is_some(), |view| {
+            view.child(
                 div()
                     .px_4()
-                    .pt_4()
-                    .pb_3()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .child(div().text_lg().font_semibold().child(PRODUCT_NAME))
-                            .child(div().text_xs().text_color(muted).child(locale.hint())),
-                    )
-                    .child(Input::new(&self.input).cleanable(true))
-                    .child(controls),
+                    .py_2()
+                    .text_color(theme.danger)
+                    .child(self.action_error.clone().unwrap_or_default()),
             )
-            .child(body)
-            .when(self.state.error.is_some(), |view| {
-                view.child(div().px_4().py_2().text_color(theme.danger).child(format!(
-                    "{}: {}",
-                    locale.failed(),
-                    self.state.error.as_deref().unwrap_or_default()
-                )))
-            })
-            .when(self.action_error.is_some(), |view| {
-                view.child(
-                    div()
-                        .px_4()
-                        .py_2()
-                        .text_color(theme.danger)
-                        .child(self.action_error.clone().unwrap_or_default()),
-                )
-            })
-            .child(footer)
+        })
+        .child(footer)
     }
 }
 

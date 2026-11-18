@@ -20,16 +20,21 @@ pub async fn query_items(pool: &SqlitePool, q: &ClipboardItemQuery) -> Result<Ve
     Ok(query_items_page(pool, q).await?.list)
 }
 
-/// 翻转 `is_favorite`（收藏 / 取消收藏），返回翻转后的新状态。
+/// 复用共享仓储，保留旧命令的应用错误类型。
 pub async fn toggle_item_favorite(pool: &SqlitePool, id: &str) -> Result<bool> {
-    let new_value: bool = sqlx::query_scalar(
-        "UPDATE clipboard_items SET is_favorite = NOT is_favorite WHERE id = ? RETURNING is_favorite",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .context("failed to toggle clipboard item favorite")?;
-    Ok(new_value)
+    Ok(ecopaste_neo_core::db::items::toggle_item_favorite(pool, id).await?)
+}
+
+pub async fn toggle_item_pinned(pool: &SqlitePool, id: &str) -> Result<bool> {
+    Ok(ecopaste_neo_core::db::items::toggle_item_pinned(pool, id).await?)
+}
+
+pub async fn update_item_note(pool: &SqlitePool, id: &str, note: Option<&str>) -> Result<()> {
+    Ok(ecopaste_neo_core::db::items::update_item_note(pool, id, note).await?)
+}
+
+pub async fn delete_item(pool: &SqlitePool, id: &str) -> Result<Option<String>> {
+    Ok(ecopaste_neo_core::db::items::delete_item(pool, id).await?)
 }
 
 /// 幂等地将 `is_favorite` 置为 true（已收藏的无变化）。auto-favorite 场景用。
@@ -42,29 +47,6 @@ pub async fn mark_item_favorite(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// 翻转 `is_pinned`（置顶 / 取消置顶），返回翻转后的新状态。
-pub async fn toggle_item_pinned(pool: &SqlitePool, id: &str) -> Result<bool> {
-    let new_value: bool = sqlx::query_scalar(
-        "UPDATE clipboard_items SET is_pinned = NOT is_pinned WHERE id = ? RETURNING is_pinned",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .context("failed to toggle clipboard item pinned")?;
-    Ok(new_value)
-}
-
-/// 更新备注，传 `None` 清空备注。
-pub async fn update_item_note(pool: &SqlitePool, id: &str, note: Option<&str>) -> Result<()> {
-    sqlx::query("UPDATE clipboard_items SET note = ? WHERE id = ?")
-        .bind(note)
-        .bind(id)
-        .execute(pool)
-        .await
-        .context("failed to update clipboard item note")?;
-    Ok(())
-}
-
 /// 更新条目所属分组；不刷新 `updated_at`，避免污染最近使用排序。
 pub async fn update_item_group(pool: &SqlitePool, id: &str, group_id: Option<&str>) -> Result<()> {
     sqlx::query("UPDATE clipboard_items SET group_id = ? WHERE id = ?")
@@ -74,22 +56,6 @@ pub async fn update_item_group(pool: &SqlitePool, id: &str, group_id: Option<&st
         .await
         .context("failed to update clipboard item group")?;
     Ok(())
-}
-
-/// 删除单条记录。若删除的是图片记录，返回其落盘文件名（`<hash>.png`），供调用方删图；
-/// 否则返回 `None`。记录不存在时也返回 `None`。
-///
-/// image 去重指纹源自 PNG 字节、落盘文件名即字节哈希，故库里同图至多一行，
-/// 删行后该文件必为孤儿，调用方可直接删，无需引用计数。
-pub async fn delete_item(pool: &SqlitePool, id: &str) -> Result<Option<String>> {
-    let row = sqlx::query_as::<_, (ClipboardKind, String)>(
-        "DELETE FROM clipboard_items WHERE id = ? RETURNING kind, content",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to delete clipboard item")?;
-    Ok(row.and_then(|(kind, content)| image_file_name(kind, content)))
 }
 
 /// 取被删行里需要连带删除的图片文件名：kind 为 image 时 `content` 即文件名，否则 `None`。

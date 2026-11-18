@@ -1,4 +1,4 @@
-//! History reads shared by the Neo application and the existing Tauri adapter.
+//! History reads and record management shared by the Neo application and the existing Tauri adapter.
 
 use blake3::Hasher;
 use chrono::Utc;
@@ -102,6 +102,53 @@ pub async fn find_item_for_list_by_id(
         .fetch_optional(pool)
         .await?;
     Ok(item)
+}
+
+/// 翻转 `is_favorite`（收藏 / 取消收藏），返回翻转后的新状态。
+pub async fn toggle_item_favorite(pool: &SqlitePool, id: &str) -> Result<bool> {
+    let new_value: bool = sqlx::query_scalar(
+        "UPDATE clipboard_items SET is_favorite = NOT is_favorite WHERE id = ? RETURNING is_favorite",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+    Ok(new_value)
+}
+
+/// 翻转 `is_pinned`（置顶 / 取消置顶），返回翻转后的新状态。
+pub async fn toggle_item_pinned(pool: &SqlitePool, id: &str) -> Result<bool> {
+    let new_value: bool = sqlx::query_scalar(
+        "UPDATE clipboard_items SET is_pinned = NOT is_pinned WHERE id = ? RETURNING is_pinned",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+    Ok(new_value)
+}
+
+/// 更新备注，传 `None` 清空备注。
+pub async fn update_item_note(pool: &SqlitePool, id: &str, note: Option<&str>) -> Result<()> {
+    sqlx::query("UPDATE clipboard_items SET note = ? WHERE id = ?")
+        .bind(note)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 删除单条记录。若删除的是图片记录，返回其落盘文件名（`<hash>.png`），供调用方删图；
+/// 否则返回 `None`。记录不存在时也返回 `None`。
+///
+/// image 去重指纹源自 PNG 字节、落盘文件名即字节哈希，故库里同图至多一行，
+/// 删行后该文件必为孤儿，调用方可直接删，无需引用计数。
+pub async fn delete_item(pool: &SqlitePool, id: &str) -> Result<Option<String>> {
+    let row = sqlx::query_as::<_, (ClipboardKind, String)>(
+        "DELETE FROM clipboard_items WHERE id = ? RETURNING kind, content",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|(kind, content)| (kind == ClipboardKind::Image).then_some(content)))
 }
 
 /// 关键词过滤分流：≥3 字符走 FTS5（trigram），1–2 字符走 LIKE 兜底，空 / 仅空白不过滤。

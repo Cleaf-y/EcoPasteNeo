@@ -118,6 +118,53 @@ impl Locale {
     pub fn pinned(self) -> &'static str {
         self.text("置顶", "Pinned")
     }
+    pub fn favorite(self) -> &'static str {
+        self.text("已收藏", "Favorite")
+    }
+    pub fn favorite_action(self, current: bool) -> &'static str {
+        if current {
+            self.text("取消收藏", "Unfavorite")
+        } else {
+            self.text("收藏", "Favorite")
+        }
+    }
+    pub fn pin_action(self, current: bool) -> &'static str {
+        if current {
+            self.text("取消置顶", "Unpin record")
+        } else {
+            self.text("置顶", "Pin record")
+        }
+    }
+    pub fn edit_note(self) -> &'static str {
+        self.text("编辑备注", "Edit note")
+    }
+    pub fn clear_note(self) -> &'static str {
+        self.text("清空备注", "Clear note")
+    }
+    pub fn delete_record(self) -> &'static str {
+        self.text("删除记录", "Delete record")
+    }
+    pub fn delete_confirmation(self) -> &'static str {
+        self.text("删除这条记录？此操作无法撤销。文件记录所指向的原文件会保留。", "Delete this record? This cannot be undone. Original files referenced by file records are kept.")
+    }
+    pub fn cancel(self) -> &'static str {
+        self.text("取消", "Cancel")
+    }
+    pub fn save(self) -> &'static str {
+        self.text("保存", "Save")
+    }
+    pub fn management_failed(self) -> &'static str {
+        self.text(
+            "无法修改记录，请重试",
+            "Could not update record. Please retry",
+        )
+    }
+    pub fn image_cleanup_failed(self) -> &'static str {
+        self.text(
+            "记录已删除，图片资源清理未完成",
+            "Record deleted; image resource cleanup is incomplete",
+        )
+    }
     pub fn count(self, loaded: usize, total: i64) -> String {
         match self {
             Self::ZhCn => format!("已加载 {loaded} / {total} 条"),

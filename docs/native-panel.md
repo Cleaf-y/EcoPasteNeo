@@ -1,6 +1,6 @@
 # macOS 原生历史面板
 
-`crates/app` 是独立的 GPUI 应用入口，生成 `EcoPasteNeo`。现有 Tauri 应用仍通过 `src-tauri/Cargo.toml` 构建。当前原生面板提供 SQLite 历史列表、搜索、分页、后台剪贴板捕获和所选记录写回。macOS 的运行与验证步骤见下文。Windows 原生面板暂缓，旧 Windows 实现保留。
+`crates/app` 是独立的 GPUI 应用入口，生成 `EcoPasteNeo`。现有 Tauri 应用仍通过 `src-tauri/Cargo.toml` 构建。当前原生面板提供 SQLite 历史列表、搜索、分页、后台剪贴板捕获、记录预览、右键管理和所选记录写回。macOS 的运行与验证步骤见下文。Windows 原生面板暂缓，旧 Windows 实现保留。
 
 ## 构建与运行
 
@@ -80,6 +80,25 @@ cargo run -p ecopaste-neo-app --example seed_preview --locked -- \
 7 条夹具分别可用 `preview07-long`、`preview07-short`、`preview07-html`、`preview07-rtf`、`preview07-image`、`preview07-files`、`preview07-sensitive` 搜索。长文本末尾为 `PREVIEW07-LONG-END-7F3A`，完整对照文件保存在测试库的 `state/preview07/long-expected.txt`；原图为 4096×2048。`preview07-switch` 只匹配大图和短文本，用于快速切换后立即关闭的检查。文件夹具包含 `move-me.txt`，移到别处后重新打开预览应显示不可用。
 
 `--test-no-capture` 必须与 `--test-data-parent` 同用，将 `ECOPASTENEO_NO_CAPTURE=1` 写入该测试包的启动环境。正常包默认仍开启监听；这个选项用于预览验证，不代替任务 05 的捕获验收。每次生成夹具都要求空库，不覆盖已有记录。
+
+## 右键菜单与记录管理
+
+右击卡片可收藏或取消收藏、置顶或取消置顶、编辑或清空备注、删除单条记录。菜单绑定右击卡片的 ID，与键盘选中项独立；列表刷新和置顶重排不会更换操作目标。卡片标题显示收藏和置顶状态。操作完成后按当前关键词重查列表，条数和排序与 SQLite 一致。
+
+编辑备注和删除确认在主面板内进行。备注输入时 Enter 保存、Esc 取消，输入法组字期间仍由输入框处理按键；这些按键不会触发列表粘贴。删除需要再次确认，取消不写库。关闭菜单、取消或完成编辑后恢复列表输入焦点，保留唤出时的外部粘贴目标。管理操作会关闭旧预览；删除文件记录保留原文件，删除图片记录清理其 Neo 原图和缩略图。收藏、置顶和备注不刷新最近使用时间。
+
+使用全新的临时库验证，避免删除已有历史：
+
+```bash
+fixture_parent="$(mktemp -d /private/tmp/ecopaste-menu08.XXXXXX)"
+cargo run -p ecopaste-neo-app --example seed_management --locked -- \
+  --data-parent "$fixture_parent" --environment dev
+./scripts/package-neo-macos.sh --test-data-parent "$fixture_parent" --test-no-capture
+```
+
+夹具仅含 5 条：`menu08-pair` 匹配 A、B 两条文本；`menu08-delete` 为专用删除文本；`menu08-files` 引用 `state/menu08/keep-original.txt`；`menu08-image` 为专用图片。生成器拒绝覆盖非空数据库。测试包退出重开仍使用同一库，不重新生成夹具。
+
+先用方向键选 A、右击 B，逐项修改并核对 B；给 B 写入独有备注后搜索，再清空备注核对旧词不再匹配。分别取消和确认专用记录的删除，核对列表、条数、预览和原文件。最后从外部专用文稿唤出，关闭菜单或备注编辑后按 Enter，核对仍粘贴到原光标处。真实粘贴由验证者主动触发。
 
 ## 粘贴与捕获验收
 

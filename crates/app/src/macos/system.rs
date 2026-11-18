@@ -6,14 +6,15 @@ use global_hotkey::{
 use objc2::MainThreadMarker;
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{Menu, MenuEvent, MenuItem},
+    menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum SystemAction {
     Toggle,
     Show,
     Quit,
+    Menu(MenuId),
 }
 
 /// Main-thread-owned integration using GPUI's existing AppKit event loop.
@@ -89,13 +90,14 @@ impl SystemIntegration {
             MainThreadMarker::new().is_some(),
             "System events must be polled on the main thread"
         );
-        while let Ok(event) = MenuEvent::receiver().try_recv() {
+        if let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id() == self.show.id() {
                 return Some(SystemAction::Show);
             }
             if event.id() == self.quit.id() {
                 return Some(SystemAction::Quit);
             }
+            return Some(SystemAction::Menu(event.id));
         }
         while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
             if event.id() == self.hotkey.id() && event.state() == HotKeyState::Pressed {

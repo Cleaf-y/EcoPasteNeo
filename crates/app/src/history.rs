@@ -38,6 +38,15 @@ pub struct HistoryPage {
     pub has_more: bool,
 }
 
+/// Every management operation carries the ID captured when its menu was opened.
+#[derive(Clone, Debug)]
+pub enum RecordAction {
+    ToggleFavorite,
+    TogglePinned,
+    Note(Option<String>),
+    Delete,
+}
+
 impl HistorySource {
     /// Validate storage identity before opening a database or touching resources.
     pub fn open(options: &Options) -> Result<Self> {
@@ -58,6 +67,43 @@ impl HistorySource {
 
     pub fn paths(&self) -> &DataPaths {
         &self.paths
+    }
+
+    /// Commit metadata on the worker; image cleanup is best effort after deletion.
+    /// A false result means the row was deleted but its image resources need cleanup.
+    pub fn manage(
+        &self,
+        id: String,
+        action: RecordAction,
+    ) -> tokio::task::JoinHandle<Result<bool>> {
+        let pool = self.pool.clone();
+        let store = ecopaste_neo_core::clipboard::ImageStore::new(&self.paths);
+        self.runtime.spawn(async move {
+            match action {
+                RecordAction::ToggleFavorite => {
+                    db::items::toggle_item_favorite(&pool, &id).await?;
+                }
+                RecordAction::TogglePinned => {
+                    db::items::toggle_item_pinned(&pool, &id).await?;
+                }
+                RecordAction::Note(note) => {
+                    db::items::update_item_note(&pool, &id, note.as_deref()).await?;
+                }
+                RecordAction::Delete => {
+                    if let Some(name) = db::items::delete_item(&pool, &id).await? {
+                        return Ok(tokio::task::spawn_blocking(move || {
+                            if let Err(error) = store.remove(&name) {
+                                eprintln!("Could not clean up deleted history image: {error:#}");
+                                return false;
+                            }
+                            true
+                        })
+                        .await?);
+                    }
+                }
+            }
+            Ok(true)
+        })
     }
 
     /// Fetch full content by ID; list summaries must never reach the writer.
@@ -609,6 +655,88 @@ mod preview_tests {
             preview(&source, "image"),
             PreviewContent::Image(None)
         ));
+        source.runtime.block_on(source.pool.close());
+    }
+
+    #[test]
+    fn management_uses_saved_ids_and_cleans_only_deleted_image_resources() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = source(temporary.path());
+        insert(&source, "a", "text", None, "alpha", Some("alpha"), false);
+        insert(&source, "b", "text", None, "beta", Some("beta"), false);
+        for action in [
+            RecordAction::ToggleFavorite,
+            RecordAction::TogglePinned,
+            RecordAction::Note(Some("note008".into())),
+        ] {
+            assert!(
+                source
+                    .runtime
+                    .block_on(source.manage("b".into(), action))
+                    .unwrap()
+                    .unwrap()
+            );
+        }
+        let page = source
+            .runtime
+            .block_on(source.query("note008".into(), 0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.rows[0].item.id, "b");
+        let a = source
+            .runtime
+            .block_on(db::items::find_item_by_id(&source.pool, "a"))
+            .unwrap()
+            .unwrap();
+        assert!(!a.is_favorite && !a.is_pinned && a.note.is_none());
+        let name = format!("{}.png", "ab".repeat(32));
+        let store = ecopaste_neo_core::clipboard::ImageStore::new(source.paths());
+        let origin = store.origin_path(&name);
+        std::fs::create_dir_all(origin.parent().unwrap()).unwrap();
+        image::RgbImage::new(20, 10).save(&origin).unwrap();
+        let thumbnail = store.ensure_thumbnail(&name).unwrap();
+        insert(&source, "image", "image", None, &name, None, false);
+        assert!(
+            source
+                .runtime
+                .block_on(source.manage("image".into(), RecordAction::Delete))
+                .unwrap()
+                .unwrap()
+        );
+        assert!(!origin.exists() && !thumbnail.exists());
+        let file = temporary.path().join("keep.txt");
+        std::fs::write(&file, "keep").unwrap();
+        insert(
+            &source,
+            "files",
+            "files",
+            None,
+            file.to_str().unwrap(),
+            None,
+            false,
+        );
+        assert!(
+            source
+                .runtime
+                .block_on(source.manage("files".into(), RecordAction::Delete))
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(std::fs::read_to_string(file).unwrap(), "keep");
+        assert!(
+            source
+                .runtime
+                .block_on(source.manage("b".into(), RecordAction::Note(None)))
+                .unwrap()
+                .unwrap()
+        );
+        let page = source
+            .runtime
+            .block_on(source.query("note008".into(), 0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.total, 0);
         source.runtime.block_on(source.pool.close());
     }
 }
