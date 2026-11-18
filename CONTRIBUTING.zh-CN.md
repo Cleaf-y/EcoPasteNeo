@@ -23,6 +23,12 @@ Linux 不在支持范围内，新增代码、依赖、构建产物和文档都�
 
 提交信息使用单行 Conventional Commits，例如 `feat:`、`fix:`、`refactor:` 或 `docs:`。
 
+### AI 工具配置
+
+统一规则放在 `AGENTS.md`，共享技能放在 `.agents/skills/`，实现中容易遗漏的约束记录在[开发注意事项](./docs/development.md)。
+工具专用配置、hooks、命令和子代理仅在本地维护，已加入 `.gitignore`；GitHub CI 工作流仍纳入版本管理。
+开发不依赖任务管理框架或自动会话日志。
+
 ## 架构
 
 EcoPaste 采用 Rust-First 的 Tauri 架构：
@@ -58,7 +64,6 @@ EcoPaste 采用 Rust-First 的 Tauri 架构：
 - `rust-toolchain.toml` 指定的 Rust 工具链（`1.96.0`，包含 `rustfmt` 和 `clippy`）。
 - Tauri v2 所需的系统原生依赖。请参考
   [Tauri prerequisites](https://tauri.app/start/prerequisites/) 中对应系统的说明。
-- Trellis 工作流文档请参考 [Trellis 文档](https://docs.trytrellis.app/zh)。
 
 ### 安装依赖
 

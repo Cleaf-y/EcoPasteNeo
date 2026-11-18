@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Tool-specific AI configuration stays local; shared skills live in .agents/.
+/.claude/
+/.codex/
+/.cursor/
+/.gemini/
+/.kiro/
+/.opencode/
+/.github/agents/
+/.github/copilot/
+/.github/hooks/
+/.github/prompts/
+/.github/skills/

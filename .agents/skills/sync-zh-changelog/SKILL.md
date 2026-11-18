@@ -8,15 +8,6 @@ description: "Synchronize an EcoPaste release section from CHANGELOG.md into CHA
 Synchronize one EcoPaste release from `CHANGELOG.md` to
 `CHANGELOG.zh-CN.md` without changing release metadata or unrelated files.
 
-## Trellis routing
-
-- Treat an explicit `$sync-zh-changelog` invocation as the user's standing
-  choice to skip Trellis task creation for this narrow documentation change.
-  Do not ask again, and do not create, activate, or archive a Trellis task.
-- When this skill is selected implicitly from natural-language intent, follow
-  the normal Trellis task-creation routing.
-- Still respect `AGENTS.md`, the dirty worktree, and applicable release specs.
-
 ## Workflow
 
 1. Read both changelog files before editing. Use the version named by the user;
@@ -36,7 +27,7 @@ Synchronize one EcoPaste release from `CHANGELOG.md` to
 6. Validate the result from the repository root:
 
    ```bash
-   python3 .agents/skills/sync-zh-changelog/scripts/check_sync.py
+   uv run python .agents/skills/sync-zh-changelog/scripts/check_sync.py
    git diff --check -- CHANGELOG.zh-CN.md
    ```
 

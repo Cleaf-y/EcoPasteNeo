@@ -30,6 +30,14 @@ not make.
 Use single-line Conventional Commits for commit messages, such as `feat:`,
 `fix:`, `refactor:`, or `docs:`.
 
+### AI Tool Configuration
+
+Keep shared instructions in `AGENTS.md`, reusable skills in `.agents/skills/`,
+and implementation-specific constraints in [Development Notes](./docs/development.md).
+Tool-specific configuration, hooks, commands, and subagents are local-only and
+gitignored; GitHub CI workflows remain tracked. No task-management framework or
+automatic session journal is required.
+
 ## Architecture
 
 EcoPaste uses a Rust-first Tauri architecture:
@@ -70,7 +78,6 @@ and `window://visibility`.
 - Native dependencies required by Tauri v2. See the
   [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your
   operating system.
-- Trellis workflow docs: [Trellis documentation](https://docs.trytrellis.app).
 
 ### Install
 

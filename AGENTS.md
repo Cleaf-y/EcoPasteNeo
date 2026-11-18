@@ -1,7 +1,7 @@
 # AGENTS.md
 
 > 本文件是本项目 AI 编码工具的**单一真相源**。其它工具入口若存在，只应引用本文件，不要重复维护规则。
-> 分阶段 backlog 已迁移到 `.trellis/tasks/`，每个任务的 PRD 与研究资料以 Trellis task 为准。
+> 修改剪贴板、数据库、设置、窗口、列表或发布逻辑前，阅读[开发注意事项](./docs/development.md)中的相关章节。
 
 EcoPaste 是跨平台剪贴板管理器，采用 Rust-First 的 Tauri 架构。
 
@@ -94,7 +94,7 @@ cargo test
 - 命令与仓储函数使用 `async`，返回 `Result<T, AppError>`；`AppError` 序列化为 `{ kind, message }`。
 - `message` 写用户可读根因，不加 `"xxx failed: {err}"` 动作前缀；动作上下文由前端 toast label 拼接，技术上下文写日志。
 - 错误处理用 `thiserror` 定义错误类型、`anyhow` 做内部传播、`tauri-plugin-log` 记录上下文。
-- 数据库使用 Tauri `State<SqlitePool>`；不要每次新建连接。
+- 数据库通过 Tauri `State<DatabaseState>` 管理，命令用 `db.pool().await` 获取当前连接池，仓储接收 `&SqlitePool`；覆盖导入和切换目录会替换连接池，不要缓存旧池或每次新建连接。
 - Cargo 依赖版本不要写 patch 级完整版本；所有依赖优先写主版本号，如 `"2"`，确需收窄时最多写到 minor，如 `"0.9"`，除非有明确锁定原因。
 - SQL 用 `sqlx::query` / `query_as`，不用 `query!` 宏，避免维护离线缓存。
 - 已发布版本的 schema 变更必须新增 migration；已发布 migration 不回改。
@@ -157,26 +157,6 @@ cargo test
 - UnoCSS：<https://unocss.dev/> · <https://unocss.dev/presets/wind4>
 - Tauri v2：<https://tauri.app/llms-full.txt>
 
-<!-- TRELLIS:START -->
+## AI 工具配置
 
-# Trellis Instructions
-
-These instructions are for AI assistants working in this project.
-
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
-
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
-
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
-
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
-
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
-
-<!-- TRELLIS:END -->
+仓库只维护 `AGENTS.md` 统一规则、`docs/` 项目文档和 `.agents/skills/` 共享技能，不提交各工具的专用配置、hooks 或子代理副本。需要平台集成时在本地配置；这些目录已加入 `.gitignore`。开发不依赖任务管理框架或自动会话日志。
