@@ -62,6 +62,14 @@ macOS 剪贴板窗口是 NSPanel：先注册插件再调用 `to_panel`，延迟�
 
 实现入口：[窗口管理](../src-tauri/src/window/mod.rs)、[生命周期](../src-tauri/src/window/lifecycle/mod.rs)、[macOS 窗口](../src-tauri/src/window/macos.rs)。
 
+## GPUI 原生历史面板
+
+`crates/app` 与旧 Tauri 入口分别构建，当前只启用 macOS。启动先使用 core 的 `Storage` 验证 Neo 身份，再打开共享数据库；本地 `.app` 打包也从 core 读取产品名与应用标识。构建、隔离夹具和启动参数见[原生面板说明](./native-panel.md)。
+
+历史查询在 Tokio worker 执行，完成后回到 GPUI 更新视图。关键词变更先递增查询代次并清空页；旧代次的成功与失败结果都不能更新界面。分页请求的偏移必须等于当前已加载条数，同一时刻只请求一页。GPUI 变高 `list` 在换词时 `reset`，追加时 `splice`，不能把已测量行的高度悄悄改变。
+
+图片缩略图和文件信息由 core 的可选 `preview` feature 准备，UI 不同步读取文件。图片沿用 `resources/clipboard-images/{origin,thumbnails}/<hash前两位>/<hash>.png` 布局；仅接受哈希文件名，不接管外部路径。输入法组字期间让输入控件处理方向键与 Esc；不要用列表导航拦截选词。macOS 非激活面板、鼠标所在屏幕定位和候选窗层级必须在实际应用中复测，不能用编译结果代替。
+
 ## Windows 输入、自启与管理员启动
 
 剪贴板窗口默认不可聚焦，普通导航通过 Rust 键盘钩子进入 `useKeyboardEvent`。进入编辑态时临时允许聚焦并关闭导航钩子；退出编辑态后恢复，只有窗口仍在前台时才还原之前的前台 HWND。编辑态由剪贴板页面集中协调，单个输入框不要各自调用原生命令。
