@@ -30,7 +30,13 @@ Neo 在创建数据库目录前验证 `.ecopasteneo-storage.json` 中的应用�
 
 运行中切换目录会暂停剪贴板监听、复制已知数据目录、替换数据库池，并同步设置和资源路径，最后广播设置及剪贴板刷新。修改其中一环时检查其余状态，避免数据库已切换但图片、图标或设置仍指向旧目录。
 
-搜索和分页由 Rust 返回最终结果。短关键词与 FTS5 搜索走不同查询，置顶优先于所选排序；前端使用返回的 `total`、`hasMore`，不要根据页大小猜测是否还有内容。
+历史模型、分页与详情查询统一在 [`crates/core/src/db/`](../crates/core/src/db/)，旧 Tauri 的 `db::models` 和只读仓储直接复用它们。新调用方先用 `Storage::open()` 确认 Neo 目录身份，再调用 `db::open(&paths)` 打开 SQLite；旧 Tauri 仍通过自己的 `db_path` 解析旧目录，并使用共享的 `db::open_at` 初始化连接池。core 默认启用 `sqlx` feature，测试不需要 Tauri 或 GPUI。
+
+迁移 SQL 仅保留在根 [`migrations/`](../migrations/)，由 core 的 `db::MIGRATOR` 嵌入，两个应用入口和内存库测试共用同一份迁移。已发布的 `0001_init.sql` 仅移动位置，内容及校验和不变；不要在旧 `src-tauri/migrations/` 再维护副本。core 的 `build.rs` 跟踪迁移目录变动，使新增迁移能触发重新编译。
+
+搜索和分页由 `db::items::query_items_page` 返回完整 `ClipboardItemPage`（`list`、`total`、`hasMore`），旧命令只补充展示数据。关键词任一空白分词少于 3 个字符时使用 LIKE，所有分词至少 3 个字符时使用 FTS5；搜索范围均为 `search_text` 和备注。置顶始终优先，然后按所选字段排序，最终按唯一 ID 倒序打破平局，保证静态数据集跨页排序稳定。调用方使用返回的 `total`、`hasMore`，不要根据页大小猜测是否还有内容。
+
+文本列表查询不加载完整 `content` 或 `search_text`，只保留摘要；预览和写回通过 `find_item_by_id(&pool, id)` 按需获取原文。查询始终接收调用方当前的 `&SqlitePool`，不会缓存连接池或重新按路径打开数据库。运行 `cargo test -p ecopaste-neo-core --test history_query` 可验证实际迁移、筛选、搜索、摘要/详情、分页及 Neo 临时文件库关闭重开。
 
 实现入口：[连接池状态](../src-tauri/src/db/state.rs)、[路径解析](../src-tauri/src/core/paths.rs)、[目录切换](../src-tauri/src/commands/storage.rs)、[备份](../src-tauri/src/backup/mod.rs)。
 

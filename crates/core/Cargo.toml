@@ -6,13 +6,15 @@ license = "Apache-2.0"
 publish = false
 
 [features]
-sqlx = ["dep:sqlx"]
+default = ["sqlx"]
+sqlx = ["dep:sqlx", "dep:chrono"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"], optional = true }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.9", default-features = false, features = ["sqlite", "macros"], optional = true }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "chrono", "migrate"], optional = true }
 tempfile = "3"
 thiserror = "2"
 

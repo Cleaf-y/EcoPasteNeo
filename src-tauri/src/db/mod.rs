@@ -31,7 +31,7 @@ pub(crate) mod test_support {
             .await
             .expect("failed to open in-memory sqlite");
 
-        sqlx::migrate!("./migrations")
+        ecopaste_neo_core::db::MIGRATOR
             .run(&pool)
             .await
             .expect("failed to run migrations on in-memory sqlite");

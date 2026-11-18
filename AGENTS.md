@@ -70,7 +70,7 @@ src-tauri/
     autostart/  # 开机自启
     settings/   # 设置模型与持久化
     core/       # 错误类型、路径、prevent_default（setup 在 lib.rs）
-  migrations/
+migrations/     # core 与旧 Tauri 共用的唯一迁移来源
 src/            # 前端 components/pages/stores/hooks/locales/utils
 ```
 

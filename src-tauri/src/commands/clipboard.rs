@@ -529,12 +529,12 @@ pub async fn list_clipboard_items(
 ) -> Result<ClipboardItemPage> {
     let pool = db.pool().await;
     let q = query.unwrap_or_default();
-    let (mut items, total) = crate::db::items::query_items_page(&pool, &q).await?;
+    let mut page = crate::db::items::query_items_page(&pool, &q).await?;
     let now = Local::now();
     let settings = app.state::<SettingsStore>().snapshot();
     let file_entry_limit = settings.clipboard.display.file_entry_limit();
     let redact_sensitive = settings.clipboard.sensitive.redact_secrets;
-    for item in &mut items {
+    for item in &mut page.list {
         attach_image_thumbnail_path(&image_store, item).await?;
         attach_source_app_icon_path(&app_icon_store, item);
         attach_file_entries(&pool, &file_icon_store, item, file_entry_limit).await?;
@@ -543,12 +543,7 @@ pub async fn list_clipboard_items(
         redact_sensitive_list_item(item, redact_sensitive);
         item.available_actions = compute_available_actions(item);
     }
-    let has_more = q.offset + (items.len() as i64) < total;
-    Ok(ClipboardItemPage {
-        list: items,
-        total,
-        has_more,
-    })
+    Ok(page)
 }
 
 /// 单条查询命令：监听到 `clipboard://updated` 后前端按 id 拉单条，

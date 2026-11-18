@@ -10,6 +10,12 @@ pub enum AppError {
     Other(#[from] anyhow::Error),
 }
 
+impl From<ecopaste_neo_core::db::DatabaseError> for AppError {
+    fn from(error: ecopaste_neo_core::db::DatabaseError) -> Self {
+        Self::Other(error.into())
+    }
+}
+
 impl AppError {
     fn kind(&self) -> &'static str {
         match self {
