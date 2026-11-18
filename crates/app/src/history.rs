@@ -69,6 +69,18 @@ impl HistorySource {
         &self.paths
     }
 
+    /// Read by the pressed record's ID and prepare current paths without UI-thread I/O.
+    pub fn prepare_drag(&self, id: String) -> tokio::task::JoinHandle<Result<Vec<PathBuf>>> {
+        let pool = self.pool.clone();
+        let paths = self.paths.clone();
+        self.runtime.spawn(async move {
+            let item = db::items::find_item_by_id(&pool, &id)
+                .await?
+                .ok_or(preview::DragFilesError::RecordMissing)?;
+            tokio::task::spawn_blocking(move || Ok(preview::drag_files(&paths, &item)?)).await?
+        })
+    }
+
     /// Commit metadata on the worker; image cleanup is best effort after deletion.
     /// A false result means the row was deleted but its image resources need cleanup.
     pub fn manage(
@@ -737,6 +749,58 @@ mod preview_tests {
             .unwrap()
             .unwrap();
         assert_eq!(page.total, 0);
+        source.runtime.block_on(source.pool.close());
+    }
+
+    #[test]
+    fn drag_preparation_reads_the_pressed_id_and_rechecks_missing_sources() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = source(temporary.path());
+        let file = temporary.path().join("file 中文.txt");
+        std::fs::write(&file, "drag fixture").unwrap();
+        insert(
+            &source,
+            "files",
+            "files",
+            None,
+            file.to_str().unwrap(),
+            None,
+            false,
+        );
+        insert(
+            &source,
+            "other",
+            "text",
+            None,
+            "other",
+            Some("other"),
+            false,
+        );
+        let paths = source
+            .runtime
+            .block_on(source.prepare_drag("files".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(paths, std::slice::from_ref(&file));
+        std::fs::rename(file, temporary.path().join("moved.txt")).unwrap();
+        let error = source
+            .runtime
+            .block_on(source.prepare_drag("files".into()))
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(
+            error.downcast_ref(),
+            Some(preview::DragFilesError::FilesMissing)
+        ));
+        let error = source
+            .runtime
+            .block_on(source.prepare_drag("missing".into()))
+            .unwrap()
+            .unwrap_err();
+        assert!(matches!(
+            error.downcast_ref(),
+            Some(preview::DragFilesError::RecordMissing)
+        ));
         source.runtime.block_on(source.pool.close());
     }
 }

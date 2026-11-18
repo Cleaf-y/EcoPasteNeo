@@ -1,3 +1,4 @@
+pub mod drag;
 pub mod history;
 pub mod locale;
 pub mod options;

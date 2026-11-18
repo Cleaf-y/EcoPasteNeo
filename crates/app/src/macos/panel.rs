@@ -26,6 +26,9 @@ use ecopaste_neo_core::writeback::WritebackGuard;
 #[path = "record_management.rs"]
 mod record_management;
 use record_management::Management;
+#[path = "file_drag.rs"]
+mod file_drag;
+use file_drag::FileDrag;
 
 pub struct HistoryPanel {
     input: Entity<InputState>,
@@ -47,6 +50,7 @@ pub struct HistoryPanel {
     refresh_pending: bool,
     preview: Option<PreviewWindow>,
     management: Management,
+    file_drag: FileDrag,
 }
 
 impl HistoryPanel {
@@ -117,6 +121,7 @@ impl HistoryPanel {
             refresh_pending: false,
             preview: None,
             management: Management::default(),
+            file_drag: FileDrag::default(),
         };
         view.load_more(false, cx);
         view
@@ -127,6 +132,9 @@ impl HistoryPanel {
     }
 
     pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.file_drag.gesture.busy() {
+            return;
+        }
         self.interaction += 1;
         self.target = native::frontmost_pid();
         self.visible = true;
@@ -139,6 +147,7 @@ impl HistoryPanel {
     }
 
     pub fn hide(&mut self, cx: &mut Context<Self>) {
+        self.file_drag.release();
         self.management.close();
         self.close_preview(false, cx);
         self.interaction += 1;
@@ -159,7 +168,12 @@ impl HistoryPanel {
                 }
             }
         }
-        if self.refresh_pending && self.visible && !self.pasting && !self.state.loading {
+        if self.refresh_pending
+            && self.visible
+            && !self.pasting
+            && !self.state.loading
+            && !self.file_drag.gesture.busy()
+        {
             self.refresh(cx);
         }
     }
@@ -174,7 +188,7 @@ impl HistoryPanel {
 
     /// Resolve the selected ID on the worker, then perform native steps on the UI thread.
     fn paste_selected(&mut self, plain: bool, cx: &mut Context<Self>) {
-        if self.pasting || self.management.blocks_list() {
+        if self.pasting || self.management.blocks_list() || self.file_drag.gesture.busy() {
             return;
         }
         let Some(row) = self.state.rows.get(self.state.selected) else {
@@ -266,6 +280,7 @@ impl HistoryPanel {
             || self.pinned
             || self.pasting
             || self.management.tracks_menu()
+            || self.file_drag.gesture.busy()
             || self.panel.is_key()
             || self
                 .preview
@@ -290,7 +305,7 @@ impl HistoryPanel {
 
     /// Reuse one nonactivating child, leaving the saved external process untouched.
     fn open_preview(&mut self, cx: &mut Context<Self>) {
-        if self.pasting || self.management.blocks_list() {
+        if self.pasting || self.management.blocks_list() || self.file_drag.gesture.busy() {
             return;
         }
         let Some(id) = self
@@ -390,6 +405,13 @@ impl HistoryPanel {
 
     /// Leave navigation and Escape to the IME while marked text is present.
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.file_drag.gesture.busy() {
+            if event.keystroke.key == "escape" {
+                self.file_drag.release();
+            }
+            cx.stop_propagation();
+            return;
+        }
         if self.management_key_down(event, window, cx) {
             return;
         }
@@ -604,11 +626,18 @@ impl HistoryPanel {
             );
         }
         let menu_id = row.item.id.clone();
+        let drag_id = menu_id.clone();
         div()
             .w_full()
             .px_3()
             .child(
                 card.on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(move |this, event, _, cx| {
+                        this.press_file_row(&drag_id, event, cx);
+                    }),
+                )
+                .on_mouse_down(
                     gpui::MouseButton::Right,
                     cx.listener(move |this, event, _, cx| {
                         cx.stop_propagation();
@@ -616,7 +645,7 @@ impl HistoryPanel {
                     }),
                 )
                 .on_click(cx.listener(move |this, _, window, cx| {
-                    if this.management.blocks_list() {
+                    if this.management.blocks_list() || !this.file_drag.gesture.allows_click() {
                         return;
                     }
                     this.state.selected = index;
@@ -631,6 +660,25 @@ impl HistoryPanel {
 
 impl Render for HistoryPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let motion = cx.entity().downgrade();
+        let release = motion.clone();
+        let drag_events = gpui::canvas(
+            |_, _, _| (),
+            move |_, _, window, _| {
+                window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _, cx| {
+                    if phase.bubble() {
+                        let _ = motion.update(cx, |this, cx| this.move_file_drag(event, cx));
+                    }
+                });
+                window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, _, cx| {
+                    if phase.capture() && event.button == gpui::MouseButton::Left {
+                        let _ = release.update(cx, |this, _| this.file_drag.release());
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full();
         let locale = self.locale;
         let dialog = self.render_record_dialog(cx);
         let theme = cx.theme();
@@ -643,7 +691,8 @@ impl Render for HistoryPanel {
             .bg(theme.background)
             .text_color(theme.foreground)
             .text_sm()
-            .capture_key_down(cx.listener(Self::key_down));
+            .capture_key_down(cx.listener(Self::key_down))
+            .child(drag_events);
         if let Some(dialog) = dialog {
             return root
                 .child(dialog)

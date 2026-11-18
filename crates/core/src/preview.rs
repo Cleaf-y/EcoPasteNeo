@@ -115,6 +115,51 @@ pub fn image_original(paths: &DataPaths, file_name: &str) -> Option<OriginalImag
     })
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum DragFilesError {
+    #[error("History record no longer exists")]
+    RecordMissing,
+    #[error("All source files are missing")]
+    FilesMissing,
+    #[error("Original image is missing or unavailable")]
+    ImageMissing,
+    #[error("This record cannot be dragged as files")]
+    Unsupported,
+    #[error("Sensitive content is hidden")]
+    Sensitive,
+}
+
+/// Resolve current file references on a worker without decoding drag-preview images.
+/// Images must be verified originals in this Neo store, never cached thumbnails.
+#[cfg(feature = "sqlx")]
+pub fn drag_files(
+    paths: &DataPaths,
+    item: &crate::db::models::ClipboardItem,
+) -> Result<Vec<PathBuf>, DragFilesError> {
+    use crate::db::models::ClipboardKind;
+    if item.is_sensitive {
+        return Err(DragFilesError::Sensitive);
+    }
+    match item.kind {
+        ClipboardKind::Files => {
+            let files: Vec<_> =
+                file_previews(&item.content, item.file_types.as_deref(), usize::MAX)
+                    .into_iter()
+                    .filter(|file| file.exists)
+                    .map(|file| file.path)
+                    .collect();
+            if files.is_empty() {
+                return Err(DragFilesError::FilesMissing);
+            }
+            Ok(files)
+        }
+        ClipboardKind::Image => image_original(paths, &item.content)
+            .map(|image| vec![image.path])
+            .ok_or(DragFilesError::ImageMissing),
+        ClipboardKind::Text => Err(DragFilesError::Unsupported),
+    }
+}
+
 /// Validate a single image reference before allowing a filesystem read or write.
 fn image_resource_path(paths: &DataPaths, directory: &str, file_name: &str) -> Option<PathBuf> {
     let hash = file_name.strip_suffix(".png")?;

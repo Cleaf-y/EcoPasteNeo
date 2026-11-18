@@ -133,6 +133,12 @@ impl Panel {
         self.native().isKeyWindow()
     }
 
+    pub(super) fn content_view(&self) -> objc2::rc::Retained<NSView> {
+        self.native()
+            .contentView()
+            .expect("GPUI window has a content view")
+    }
+
     /// Run native tracking outside GPUI entity updates: AppKit dispatches nested events.
     pub fn popup_menu(&self, menu: &tray_icon::menu::Menu, position: gpui::Point<gpui::Pixels>) {
         use tray_icon::menu::{ContextMenu, dpi::LogicalPosition};

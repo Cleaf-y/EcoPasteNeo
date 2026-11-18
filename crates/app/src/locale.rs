@@ -165,6 +165,28 @@ impl Locale {
             "Record deleted; image resource cleanup is incomplete",
         )
     }
+    pub fn drag_error(self, reason: Option<&ecopaste_neo_core::preview::DragFilesError>) -> String {
+        use ecopaste_neo_core::preview::DragFilesError;
+        match reason {
+            Some(DragFilesError::FilesMissing) => self.text(
+                "源文件均已不存在，无法拖出",
+                "All source files are missing; cannot drag",
+            ),
+            Some(DragFilesError::ImageMissing) => self.text(
+                "原图不存在或不可用，无法拖出",
+                "Original image is missing or unavailable; cannot drag",
+            ),
+            Some(DragFilesError::Sensitive) => self.sensitive_hidden(),
+            Some(DragFilesError::RecordMissing) => {
+                self.text("记录已不存在，无法拖出", "Record is missing; cannot drag")
+            }
+            _ => self.text(
+                "无法拖出文件，请重新按住卡片并拖动",
+                "Could not drag files. Press and drag the card again",
+            ),
+        }
+        .into()
+    }
     pub fn count(self, loaded: usize, total: i64) -> String {
         match self {
             Self::ZhCn => format!("已加载 {loaded} / {total} 条"),

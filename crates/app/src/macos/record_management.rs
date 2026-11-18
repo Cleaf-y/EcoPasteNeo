@@ -50,9 +50,14 @@ impl HistoryPanel {
         event: &MouseDownEvent,
         cx: &mut Context<Self>,
     ) {
-        if !self.visible || self.pasting || self.management.blocks_list() {
+        if !self.visible
+            || self.pasting
+            || self.management.blocks_list()
+            || self.file_drag.gesture.busy()
+        {
             return;
         }
+        self.file_drag.release();
         let Some(row) = self.state.rows.iter().find(|row| row.item.id == id) else {
             return;
         };

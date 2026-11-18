@@ -1,3 +1,4 @@
+mod drag_out;
 mod history_menu;
 mod native;
 mod panel;
@@ -70,6 +71,7 @@ pub fn run() -> Result<()> {
                     panel.update(cx, |view, cx| {
                         view.poll_capture(cx);
                         view.poll_management(window, cx);
+                        view.poll_drag(cx);
                     });
                 });
                 while let Some(action) = integration.next_action() {
