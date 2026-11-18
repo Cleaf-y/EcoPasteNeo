@@ -8,6 +8,7 @@ use ecopaste_neo_core::{
     },
     paths::{DataPaths, Storage},
     preview::{self, FilePreview},
+    settings::{Settings, SettingsChange, SettingsStore},
 };
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
@@ -22,6 +23,7 @@ pub struct HistorySource {
     runtime: Arc<Runtime>,
     pool: SqlitePool,
     paths: DataPaths,
+    settings: Arc<SettingsStore>,
 }
 
 #[derive(Debug)]
@@ -58,15 +60,36 @@ impl HistorySource {
                 .build()?,
         );
         let pool = runtime.block_on(db::open(&paths))?;
+        let settings = Arc::new(SettingsStore::open(&paths));
         Ok(Self {
             runtime,
             pool,
             paths,
+            settings,
         })
     }
 
     pub fn paths(&self) -> &DataPaths {
         &self.paths
+    }
+
+    pub fn settings(&self) -> &Arc<SettingsStore> {
+        &self.settings
+    }
+
+    /// File writes run on the blocking worker; the listener sees only committed values.
+    pub fn update_settings(
+        &self,
+        change: SettingsChange,
+    ) -> tokio::task::JoinHandle<Result<Settings>> {
+        let settings = self.settings.clone();
+        self.runtime
+            .spawn_blocking(move || Ok(settings.update(change)?))
+    }
+
+    pub fn reload_settings(&self) -> tokio::task::JoinHandle<Result<Settings>> {
+        let settings = self.settings.clone();
+        self.runtime.spawn_blocking(move || Ok(settings.reload()?))
     }
 
     /// Read by the pressed record's ID and prepare current paths without UI-thread I/O.
@@ -144,14 +167,15 @@ impl HistorySource {
         &self,
         guard: Arc<ecopaste_neo_core::writeback::WritebackGuard>,
     ) -> Result<CaptureSession> {
-        use ecopaste_neo_core::clipboard::{self, CaptureSettings, ImageStore};
+        use ecopaste_neo_core::clipboard::{self, ImageStore};
         let (send, mut receive) = tokio::sync::mpsc::channel(16);
         let (updates, events) = std::sync::mpsc::sync_channel(32);
         let errors = updates.clone();
+        let settings = self.settings.clone();
         let watcher = clipboard::native::start_watcher(
             ImageStore::new(&self.paths),
             guard,
-            || Some(CaptureSettings::default()),
+            move || settings.capture_settings(),
             move |result| {
                 if send.try_send(result).is_err() {
                     let _ = errors.try_send(false);

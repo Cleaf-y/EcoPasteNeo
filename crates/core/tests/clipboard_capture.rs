@@ -74,6 +74,93 @@ fn png() -> ImagePayload {
     }
 }
 
+/// Synthetic payloads exercise the persisted live choices without the system clipboard.
+#[tokio::test]
+async fn saved_switches_gate_all_five_formats_and_rich_text_falls_back() {
+    use ecopaste_neo_core::{
+        clipboard::settings::CaptureKind,
+        settings::{SettingsChange, SettingsStore},
+    };
+    let (_dir, paths, pool, images) = database().await;
+    let store = SettingsStore::open(&paths);
+    let formats = [
+        (CaptureKind::Text, text("CONTROL11-TEXT")),
+        (
+            CaptureKind::Html,
+            ClipboardPayload::Text(TextPayload {
+                text: "CONTROL11-HTML".into(),
+                html: Some("<b>CONTROL11-HTML</b>".into()),
+                rtf: None,
+            }),
+        ),
+        (
+            CaptureKind::Rtf,
+            ClipboardPayload::Text(TextPayload {
+                text: "CONTROL11-RTF".into(),
+                html: None,
+                rtf: Some(r"{\rtf1 CONTROL11-RTF}".into()),
+            }),
+        ),
+        (CaptureKind::Image, ClipboardPayload::Image(png())),
+        (
+            CaptureKind::Files,
+            ClipboardPayload::Files(vec!["/tmp/CONTROL11-FILE".into()]),
+        ),
+    ];
+    for (kind, payload) in &formats {
+        for candidate in [
+            CaptureKind::Text,
+            CaptureKind::Html,
+            CaptureKind::Rtf,
+            CaptureKind::Image,
+            CaptureKind::Files,
+        ] {
+            store
+                .update(SettingsChange::CaptureType(candidate, candidate == *kind))
+                .unwrap();
+        }
+        let settings = store.capture_settings().unwrap();
+        let prepared = prepare_capture(&images, payload, &settings, None, None)
+            .unwrap()
+            .unwrap();
+        persist_capture(&pool, &prepared).await.unwrap();
+        store
+            .update(SettingsChange::CaptureType(*kind, false))
+            .unwrap();
+        let disabled = store.capture_settings().unwrap();
+        assert!(prepare_capture(&images, payload, &disabled, None, None)
+            .unwrap()
+            .is_none());
+    }
+    assert_eq!(
+        query_items_page(&pool, &ClipboardItemQuery::default())
+            .await
+            .unwrap()
+            .total,
+        5
+    );
+    store
+        .update(SettingsChange::CaptureType(CaptureKind::Text, true))
+        .unwrap();
+    let settings = store.capture_settings().unwrap();
+    let fallback = prepare_capture(&images, &formats[1].1, &settings, None, None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(fallback.item.kind, ClipboardKind::Text);
+    assert_ne!(fallback.item.sub_kind, Some(ClipboardSubKind::Html));
+    assert_eq!(fallback.item.content, "CONTROL11-HTML");
+    store.update(SettingsChange::CaptureEnabled(false)).unwrap();
+    assert!(store.capture_settings().is_none());
+    let reopened = SettingsStore::open(&paths);
+    assert!(reopened.capture_settings().is_none());
+    reopened
+        .update(SettingsChange::CaptureEnabled(true))
+        .unwrap();
+    assert!(reopened.capture_settings().unwrap().capture.text);
+    assert!(!reopened.capture_settings().unwrap().capture.image);
+    pool.close().await;
+}
+
 #[tokio::test]
 async fn text_rich_text_and_files_persist_deduplicate_and_reopen() {
     let (dir, paths, pool, images) = database().await;

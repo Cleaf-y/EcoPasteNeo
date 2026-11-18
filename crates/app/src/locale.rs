@@ -19,6 +19,45 @@ impl Locale {
     pub fn quit(self) -> &'static str {
         self.text("退出", "Quit")
     }
+    pub fn settings_title(self) -> &'static str {
+        self.text("设置", "Settings")
+    }
+    pub fn settings_hint(self) -> &'static str {
+        self.text("更改自动保存，下一次复制即生效。暂停采集不会影响已有历史记录的查询和粘贴。", "Changes save automatically and apply to the next copy. Pausing capture keeps history search and paste available.")
+    }
+    pub fn capture_enabled(self) -> &'static str {
+        self.text("采集剪贴板", "Capture clipboard")
+    }
+    pub fn capture_type(
+        self,
+        kind: ecopaste_neo_core::clipboard::settings::CaptureKind,
+    ) -> &'static str {
+        use ecopaste_neo_core::clipboard::settings::CaptureKind;
+        match kind {
+            CaptureKind::Text => self.text("纯文本", "Plain text"),
+            CaptureKind::Html => "HTML",
+            CaptureKind::Rtf => "RTF",
+            CaptureKind::Image => self.image(),
+            CaptureKind::Files => self.files(),
+        }
+    }
+    pub fn saving(self) -> &'static str {
+        self.text("正在保存…", "Saving…")
+    }
+    pub fn settings_error(self, unavailable: bool, error: &str) -> String {
+        let label = if unavailable {
+            self.text(
+                "无法读取设置，已暂停采集。请修复设置文件后重试",
+                "Settings unavailable; capture paused. Repair the settings file and retry",
+            )
+        } else {
+            self.text(
+                "保存失败，仍使用上次保存的设置",
+                "Could not save; previous settings remain active",
+            )
+        };
+        format!("{label}: {error}")
+    }
     pub fn search(self) -> &'static str {
         self.text("搜索历史记录", "Search history")
     }

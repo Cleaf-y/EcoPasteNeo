@@ -13,6 +13,7 @@ use tray_icon::{
 pub enum SystemAction {
     Toggle,
     Show,
+    Settings,
     Quit,
     Menu(MenuId),
 }
@@ -25,6 +26,7 @@ pub struct SystemIntegration {
     tray: TrayIcon,
     _menu: Menu,
     show: MenuItem,
+    settings: MenuItem,
     quit: MenuItem,
 }
 
@@ -40,7 +42,9 @@ impl SystemIntegration {
         );
         let show = MenuItem::new(locale.show(), true, None);
         let quit = MenuItem::new(locale.quit(), true, None);
-        let menu = Menu::with_items(&[&show, &quit]).context("Could not build the tray menu")?;
+        let settings = MenuItem::new(locale.settings_title(), true, None);
+        let menu = Menu::with_items(&[&show, &settings, &quit])
+            .context("Could not build the tray menu")?;
         let tray = TrayIconBuilder::new()
             .with_tooltip("EcoPasteNeo — Ctrl+Alt+Cmd+V")
             .with_title("Neo")
@@ -60,6 +64,7 @@ impl SystemIntegration {
             tray,
             _menu: menu,
             show,
+            settings,
             quit,
         })
     }
@@ -96,6 +101,9 @@ impl SystemIntegration {
             }
             if event.id() == self.quit.id() {
                 return Some(SystemAction::Quit);
+            }
+            if event.id() == self.settings.id() {
+                return Some(SystemAction::Settings);
             }
             return Some(SystemAction::Menu(event.id));
         }

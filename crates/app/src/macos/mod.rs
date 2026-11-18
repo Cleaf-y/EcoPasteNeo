@@ -3,6 +3,7 @@ mod history_menu;
 mod native;
 mod panel;
 mod paste;
+mod preferences;
 mod record_preview;
 mod system;
 
@@ -34,6 +35,8 @@ pub fn run() -> Result<()> {
             }
         };
         let bounds = Bounds::centered(None, size(px(620.0), px(700.0)), cx);
+        let mut settings = preferences::SettingsWindow::new(source.clone(), options.locale, cx);
+        let settings_unavailable = source.settings().snapshot().is_err();
         let mut panel = None;
         let handle = cx
             .open_window(
@@ -63,6 +66,9 @@ pub fn run() -> Result<()> {
             )
             .expect("Cannot create EcoPasteNeo panel");
         let panel = panel.expect("Panel view must exist");
+        if settings_unavailable && let Err(error) = settings.show(cx) {
+            eprintln!("Could not show settings: {error:#}");
+        }
         let executor = cx.background_executor().clone();
         cx.spawn(async move |cx| {
             loop {
@@ -79,12 +85,22 @@ pub fn run() -> Result<()> {
                         cx.update(|cx| cx.quit());
                         return;
                     }
+                    if matches!(action, SystemAction::Settings) {
+                        let _ = handle
+                            .update(cx, |_, _, cx| panel.update(cx, |view, cx| view.hide(cx)));
+                        cx.update(|cx| {
+                            if let Err(error) = settings.show(cx) {
+                                eprintln!("Could not show settings: {error:#}");
+                            }
+                        });
+                        continue;
+                    }
                     if handle
                         .update(cx, |_, window, cx| {
                             panel.update(cx, |view, cx| match action {
                                 SystemAction::Toggle if view.visible() => view.hide(cx),
                                 SystemAction::Toggle | SystemAction::Show => view.show(window, cx),
-                                SystemAction::Quit => unreachable!(),
+                                SystemAction::Quit | SystemAction::Settings => unreachable!(),
                                 SystemAction::Menu(id) => view.handle_menu_event(&id, window, cx),
                             });
                         })

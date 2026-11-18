@@ -64,6 +64,8 @@ Neo 在创建数据库目录前验证 `.ecopasteneo-storage.json` 中的应用�
 
 实现入口：[设置存储](../src-tauri/src/settings/store.rs)、[设置命令](../src-tauri/src/commands/settings.rs)、[前端镜像](../src/stores/settings.ts)。
 
+Neo GPUI 的设置由 [`crates/core/src/settings.rs`](../crates/core/src/settings.rs) 独立管理，只接收 `DataPaths`，不读取旧 Tauri 设置。默认值仅在文件确实不存在时保存；读取或解析失败使监听回调返回 `None`，并显示设置错误，禁止用默认允许采集的快照继续监听。窗口只发送单字段 `SettingsChange`；磁盘写入在 worker 串行完成，原子替换成功后更新内存。未保存值不能显示为已生效，也不能传入监听器。设置正常关闭后仍保留未完成写入，重开复用同一视图；窗口本身是普通 GPUI 窗口，不把历史 NSPanel 改成普通窗口。
+
 ## 窗口生命周期与消息投递
 
 窗口显隐统一调用 `window::show_window`、`hide_window`、`toggle_window`，不要绕过几何保存、定位、生命周期和 `window://visibility` 通知。可销毁窗口重建后，前端等待 `settingsReady` 再调用 `notify_window_ready`。

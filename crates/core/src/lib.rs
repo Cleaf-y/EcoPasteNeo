@@ -7,4 +7,6 @@ pub mod identity;
 pub mod paths;
 #[cfg(feature = "preview")]
 pub mod preview;
+#[cfg(feature = "capture")]
+pub mod settings;
 pub mod writeback;
