@@ -1,4 +1,7 @@
-use super::system::{SystemIntegration, parse_combination};
+use super::{
+    login::{self, LoginStatus},
+    system::{SystemIntegration, parse_combination},
+};
 use ecopaste_neo_app::{history::HistorySource, locale::Locale};
 use ecopaste_neo_core::panel_shortcut::{PanelShortcut, TapModifier};
 use ecopaste_neo_core::{
@@ -83,6 +86,7 @@ impl SettingsWindow {
     /// Reuse a live normal window; a closed window is recreated with the same view.
     pub fn show(&mut self, cx: &mut App) -> anyhow::Result<()> {
         self.view.update(cx, |view, cx| {
+            view.refresh_login(None, cx);
             if view.pending.is_none() {
                 view.sync();
                 cx.notify();
@@ -123,6 +127,9 @@ impl SettingsWindow {
 }
 
 struct Preferences {
+    login_status: Option<LoginStatus>,
+    login_error: Option<String>,
+    login_pending: Option<Task<()>>,
     integration: Rc<RefCell<SystemIntegration>>,
     draft: PanelShortcut,
     recording: bool,
@@ -149,6 +156,9 @@ impl Preferences {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut view = Self {
+            login_status: None,
+            login_error: None,
+            login_pending: None,
             integration,
             draft: PanelShortcut::default(),
             recording: false,
@@ -168,6 +178,41 @@ impl Preferences {
         };
         view.sync();
         view
+    }
+
+    /// Read system state on open and after every mutation; never save an optimistic boolean.
+    fn refresh_login(&mut self, enabled: Option<bool>, cx: &mut Context<Self>) {
+        if self.login_pending.is_some() {
+            return;
+        }
+        let locale = self.locale;
+        let task = cx.background_executor().spawn(async move {
+            let error = enabled
+                .and_then(|enabled| login::set_enabled(enabled, locale).err())
+                .map(|error| error.to_string());
+            (login::status(locale), error)
+        });
+        self.login_pending = Some(cx.spawn(async move |this, cx| {
+            let (status, error) = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.login_pending = None;
+                match status {
+                    Ok(status) => {
+                        this.login_status = Some(status);
+                        this.login_error = error;
+                    }
+                    Err(status_error) => {
+                        this.login_status = None;
+                        this.login_error = Some(match error {
+                            Some(error) => format!("{error}\n{status_error}"),
+                            None => status_error.to_string(),
+                        });
+                    }
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
     }
 
     /// Reopening reads committed memory, without re-reading or repairing the file.
@@ -575,6 +620,64 @@ impl Render for Preferences {
                         })),
                 ),
         );
+        let mut login_controls = div()
+            .v_flex()
+            .gap_3()
+            .child(
+                Switch::new("login-enabled")
+                    .label(self.locale.login_title())
+                    .checked(self.login_status == Some(LoginStatus::Enabled))
+                    .disabled(
+                        self.login_pending.is_some()
+                            || self.login_status.is_none_or(|status| !status.can_change()),
+                    )
+                    .on_change(
+                        cx.listener(|this, enabled, _, cx| this.refresh_login(Some(*enabled), cx)),
+                    ),
+            )
+            .child(div().text_sm().child(self.locale.login_hint()))
+            .child(div().text_sm().child(if self.login_pending.is_some() {
+                self.locale.login_loading()
+            } else {
+                self.login_status
+                    .map(|status| status.label(self.locale))
+                    .unwrap_or(self.locale.login_unknown())
+            }))
+            .child(
+                Button::new("refresh-login")
+                    .label(self.locale.login_refresh())
+                    .disabled(self.login_pending.is_some())
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh_login(None, cx))),
+            );
+        if self.login_status == Some(LoginStatus::RequiresApproval) {
+            login_controls = login_controls.child(
+                div()
+                    .flex()
+                    .gap_3()
+                    .child(
+                        Button::new("approve-login")
+                            .label(self.locale.login_system_settings())
+                            .on_click(|_, _, _| login::open_system_settings()),
+                    )
+                    .child(
+                        Button::new("remove-login")
+                            .label(self.locale.login_remove())
+                            .disabled(self.login_pending.is_some())
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.refresh_login(Some(false), cx)),
+                            ),
+                    ),
+            );
+        }
+        if let Some(error) = &self.login_error {
+            login_controls = login_controls.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().danger)
+                    .child(error.clone()),
+            );
+        }
+
         let mut content = div()
             .id("settings")
             .track_focus(&self.focus)
@@ -599,6 +702,7 @@ impl Render for Preferences {
                     .text_color(cx.theme().muted_foreground)
                     .child(self.locale.settings_hint()),
             )
+            .child(login_controls)
             .child(shortcuts)
             .child(
                 Switch::new("capture-enabled")

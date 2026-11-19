@@ -408,6 +408,7 @@ mod database_tests {
             environment: Environment::Dev,
             locale: Locale::ZhCn,
             show: false,
+            auto_launch: false,
             capture: false,
         };
         let source = HistorySource::open(&options).unwrap();
@@ -521,6 +522,7 @@ mod preview_tests {
             environment: Environment::Dev,
             locale: Locale::ZhCn,
             show: false,
+            auto_launch: false,
             capture: false,
         })
         .unwrap()

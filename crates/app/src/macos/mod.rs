@@ -1,5 +1,6 @@
 mod drag_out;
 mod history_menu;
+mod login;
 mod native;
 mod panel;
 mod paste;
@@ -12,7 +13,9 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use ecopaste_neo_app::{history::HistorySource, options::Options};
-use gpui::{App, AppContext, Bounds, WindowBounds, WindowKind, WindowOptions, px, size};
+use gpui::{
+    App, AppContext, Bounds, WindowBounds, WindowKind, WindowOptions, WindowingRequest, px, size,
+};
 use gpui_component::Root;
 use panel::HistoryPanel;
 use system::{SystemAction, SystemIntegration};
@@ -25,7 +28,10 @@ pub fn run() -> Result<()> {
         "EcoPasteNeo database: {}",
         source.paths().db_path().display()
     );
-    gpui_platform::application().run(move |cx: &mut App| {
+    // Set accessory policy before AppKit launches; the graphical backend stays available.
+    let application = gpui_platform::application().with_windowing(WindowingRequest::Headless);
+    application.run(move |cx: &mut App| {
+        let login_startup = login::launched_at_login();
         gpui_component::init(cx);
         let integration = match SystemIntegration::new(
             options.locale,
@@ -53,6 +59,7 @@ pub fn run() -> Result<()> {
         );
         let settings_unavailable =
             source.settings().snapshot().is_err() || integration.borrow().error().is_some();
+        let startup = options.startup_windows(login_startup, settings_unavailable);
         let mut panel = None;
         let handle = cx
             .open_window(
@@ -73,7 +80,7 @@ pub fn run() -> Result<()> {
                         let _ = weak.update(cx, |view, cx| view.hide(cx));
                         false
                     });
-                    if options.show {
+                    if startup.panel {
                         view.update(cx, |view, cx| view.show(window, cx));
                     }
                     panel = Some(view.clone());
@@ -89,7 +96,9 @@ pub fn run() -> Result<()> {
             },
             cx,
         );
-        if settings_unavailable && let Err(error) = settings.show(cx) {
+        if startup.settings
+            && let Err(error) = settings.show(cx)
+        {
             eprintln!("Could not show settings: {error:#}");
         }
         let executor = cx.background_executor().clone();

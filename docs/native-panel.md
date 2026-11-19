@@ -20,11 +20,24 @@ cargo run -p ecopaste-neo-app --bin EcoPasteNeo -- --show
 |---|---|
 | `--no-capture` | 禁用系统监听，用于只读列表测试；默认启动监听，不读取旧 EcoPaste 数据 |
 | `--show` | 启动时显示面板，默认隐藏 |
+| `--auto-launch` | 显式检查后台启动路径，优先于 `--show` 和 `ECOPASTENEO_SHOW`；不能代替实际登录验收 |
 | `--data-parent /absolute/path` | 指定不含应用标识的平台数据父目录，仍经过 `Storage` 的 Neo 身份校验 |
 | `--environment dev` / `prod` | 明确选择数据环境；默认按 debug/release 构建区分 |
 | `--locale zh-CN` / `en-US` | 界面语言，默认简体中文 |
 
 macOS 默认数据父目录是 `~/Library/Application Support`。`ECOPASTENEO_DATA_PARENT` 提供与 `--data-parent` 相同的启动默认值，显式参数优先；`ECOPASTENEO_SHOW=1` 等同于默认启用 `--show`，用于由 Launch Services 启动的测试包。
+
+## macOS 登录启动
+
+设置中的“登录时启动”直接读取 `SMAppService.mainAppService` 的系统状态，不向 Neo 配置文件写入自启布尔值。首次运行和后续启动均不主动注册。打开或再次打开设置、点击刷新、完成开关操作后重新查询系统；系统里关闭后不会因启动 Neo 而重新启用。未注册、已启用、需要批准和服务未找到分别显示，只有系统返回已启用时开关才打开。需要批准时可打开系统登录项设置或移除注册；重复开启不会再次注册等待批准的项目。失败保留原生错误原因。
+
+只允许从产品标识和当前可执行路径均匹配的已打包 `EcoPasteNeo.app` 操作登录项，`target/debug` 无法注册。主应用服务直接关联当前包，不提供额外 LaunchAgent 或助手。Apple 的[主应用登录项](https://developer.apple.com/documentation/servicemanagement/smappservice/mainapp)在后续登录启动，不会在注册时立即新开一份进程；注销此服务也不终止当前主应用。
+
+主应用服务没有自定义参数，应用在 GPUI 的 `applicationDidFinishLaunching` 回调内读取当前 Apple Event，以 `kAEOpenApplication` 及 `keyAEPropData == keyAELaunchedAsLogInItem` [识别登录启动](https://developer.apple.com/documentation/coreservices/1556410-launch_apple_event_constants/keyaelaunchedasloginitem?language=objc)。登录启动和显式 `--auto-launch` 均不显示面板；设置损坏或快捷键不可用时也不自动弹设置。采集仍使用保存过的规则；配置不可用时保持暂停，从托盘进入设置查看错误。手动 `--show` 和手动启动的设置错误恢复入口保留。
+
+应用在 AppKit 启动前设置 Accessory 策略，保留图形后端和托盘，避免 GPUI 默认 Regular 策略覆盖菜单栏应用行为。最低构建目标保留 macOS 11.0，包内明确写入 `LSMinimumSystemVersion`；这不表示已经在 macOS 11/12 完成实测。登录项功能仅用于 macOS 13+，先检查系统版本和类是否存在，再调用 ServiceManagement；macOS 11/12 显示不可用，不安装旧式登录项，也不将整个应用的最低版本抬到 13。
+
+签名包的开关、系统外部禁用，以及开启和关闭后各一次真实退出登录仍需单独验收。手动参数和合成 Apple Event 的自动测试只验证后台启动判断，不能证明 macOS 实际登录时发送了预期事件。测试时保存工作，关闭“重新登录时重新打开窗口”，核对单一托盘、窗口隐藏、前台焦点及已保存快捷键的首次唤出与粘贴；结束时恢复原系统登录项状态。
 
 ## 全局面板快捷键
 
@@ -36,7 +49,7 @@ macOS 默认数据父目录是 `~/Library/Application Support`。`ECOPASTENEO_DA
 
 双击使用 Session 级 `CGEventTap` 的 [`ListenOnly`](https://developer.apple.com/documentation/coregraphics/cgeventtapoptions)，在现有主 run loop 观察修饰键及普通按键的按下、松开，不吞键、不模拟按键、不保存输入内容。每次轻按及首按下到第二次松开的总时间均以系统 [`NSEvent.doubleClickInterval`](https://developer.apple.com/documentation/appkit/nsevent/doubleclickinterval) 为上限，第二次松开才派发；长按、其他按键和修饰键组合取消当前进度，成功后两次轻按不能复用。切回组合键或退出即移除监听源并使 Mach port 失效。
 
-组合键模式不申请输入监控权限。选择双击模式会先说明用途，点击保存才允许请求授权；未授权时保留原设置。冷启动只检查权限，不弹出授权请求。已保存组合被独占，或双击权限撤销/监听不可用时，保留托盘与应用菜单的显示、设置、退出入口，并自动打开设置解释原因。普通输入及面板内 Enter、Esc、输入法处理保持原样。
+组合键模式不申请输入监控权限。选择双击模式会先说明用途，点击保存才允许请求授权；未授权时保留原设置。冷启动只检查权限，不弹出授权请求。已保存组合被独占，或双击权限撤销/监听不可用时，保留托盘与应用菜单的显示、设置、退出入口；手动启动自动打开设置解释原因，登录启动只保留菜单入口。普通输入及面板内 Enter、Esc、输入法处理保持原样。
 
 显式的 macOS 占用夹具用于隔离验收，不读取剪贴板或发送键盘事件：
 
@@ -163,7 +176,7 @@ cargo run -p ecopaste-neo-app --example seed_drag --locked -- \
 
 设置中的“排除应用”通过“添加应用…”选择 `.app`，列表显示其 bundle identifier，重复选择同一应用不会增加条目。每项可以移除，也可以清空列表；清空后重启保持为空，不重新补回默认的“钥匙串访问”和“密码”。保存成功后，下一次从匹配来源复制时会在读取内容前跳过；无法识别来源时沿用原有采集处理。规则不按显示名称、窗口标题或域名匹配，也不清理该应用过去的历史。
 
-保存失败时窗口显示原因和设置文件路径，窗口与监听器继续使用成功保存过的值。启动时文件无法读取或解析，则暂停采集并自动打开设置窗口；开关不可用，原文件不被默认值覆盖。修复文件后点击“重试”重新加载，成功后才恢复该文件允许的行为。没有自动修复、配置导入或数据目录热切换。
+保存失败时窗口显示原因和设置文件路径，窗口与监听器继续使用成功保存过的值。启动时文件无法读取或解析，则暂停采集；手动启动自动打开设置窗口，登录启动保留托盘入口且不弹窗口。采集开关不可用，原文件不被默认值覆盖；系统登录项独立于配置文件，仍可查询和操作。修复文件后点击“重试”重新加载，成功后才恢复该文件允许的行为。没有自动修复、配置导入或数据目录热切换。
 
 实测使用全新的临时父目录打包，保持监听开启：
 

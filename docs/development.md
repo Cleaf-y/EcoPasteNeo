@@ -74,6 +74,8 @@ Neo 的 macOS 面板唤出选择单独保存在 `panelShortcut`（组合键或�
 
 ## 窗口生命周期与消息投递
 
+Neo 的 macOS 登录启动只使用当前签名主应用的 `SMAppService.mainAppService`。登录项状态不持久化进业务设置，启动不注册或恢复系统中已禁用的项目；设置打开与操作结束都重新查系统状态。原生调用先检查 macOS 13+、类可用性、当前包标识和可执行路径，禁止注册未打包程序。保留 macOS 11.0 构建目标，11/12 仅禁用此功能。登录启动由 GPUI 完成启动回调中的 Apple Event 标记识别；显式 `--auto-launch` 仅用于检查同一后台路径。两者均覆盖显示环境变量、`--show` 和自动设置错误窗口，避免登录时抢焦点；配置损坏仍暂停采集。Accessory 策略在 AppKit 启动前设置，不能等到窗口出现后再改。实现与人工登录验收步骤见[原生面板说明](./native-panel.md#macos-登录启动)。
+
 窗口显隐统一调用 `window::show_window`、`hide_window`、`toggle_window`，不要绕过几何保存、定位、生命周期和 `window://visibility` 通知。可销毁窗口重建后，前端等待 `settingsReady` 再调用 `notify_window_ready`。
 
 偏好设置窗口可能尚未创建或正在重建，不能只向它发送一次事件。设置高亮通过 `open_preference_with_highlight` 暂存，再由 `take_pending_preference_highlight` 消费；收到备份文件同样通过 `emit_received_backup` 与 `take_pending_backup` 交接，避免监听器挂载前丢消息。

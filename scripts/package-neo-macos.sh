@@ -56,6 +56,7 @@ info = {
     'CFBundleShortVersionString': version,
     'CFBundleVersion': version,
     'LSUIElement': True,
+    'LSMinimumSystemVersion': '11.0',
     'NSHighResolutionCapable': True,
 }
 if test_parent:

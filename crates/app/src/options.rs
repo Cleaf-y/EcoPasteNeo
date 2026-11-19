@@ -12,12 +12,29 @@ pub struct Options {
     pub environment: Environment,
     pub locale: Locale,
     pub show: bool,
+    pub auto_launch: bool,
     pub capture: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct StartupWindows {
+    pub panel: bool,
+    pub settings: bool,
 }
 
 impl Options {
     /// Parse only supported flags, refusing ambiguous paths or unknown arguments.
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self> {
+        Self::parse_with_show(
+            arguments,
+            std::env::var_os("ECOPASTENEO_SHOW").is_some_and(|value| value == "1"),
+        )
+    }
+
+    fn parse_with_show(
+        arguments: impl IntoIterator<Item = String>,
+        mut show: bool,
+    ) -> Result<Self> {
         let mut args = arguments.into_iter();
         let mut data_parent = std::env::var_os("ECOPASTENEO_DATA_PARENT").map(PathBuf::from);
         let mut environment = if cfg!(debug_assertions) {
@@ -26,12 +43,13 @@ impl Options {
             Environment::Prod
         };
         let mut locale = Locale::ZhCn;
-        let mut show = std::env::var_os("ECOPASTENEO_SHOW").is_some_and(|value| value == "1");
+        let mut auto_launch = false;
         let mut capture =
             !std::env::var_os("ECOPASTENEO_NO_CAPTURE").is_some_and(|value| value == "1");
         while let Some(argument) = args.next() {
             match argument.as_str() {
                 "--show" => show = true,
+                "--auto-launch" => auto_launch = true,
                 "--no-capture" => capture = false,
                 "--data-parent" => {
                     data_parent = Some(PathBuf::from(
@@ -68,8 +86,22 @@ impl Options {
             environment,
             locale,
             show,
+            auto_launch,
             capture,
         })
+    }
+
+    /// Login startup takes precedence over explicit flags, environment and recovery UI.
+    pub fn startup_windows(
+        &self,
+        system_login: bool,
+        settings_unavailable: bool,
+    ) -> StartupWindows {
+        let background = self.auto_launch || system_login;
+        StartupWindows {
+            panel: !background && self.show,
+            settings: !background && settings_unavailable,
+        }
     }
 }
 
@@ -130,5 +162,62 @@ mod tests {
         ] {
             assert!(Options::parse(args(&values)).is_err());
         }
+    }
+
+    #[test]
+    fn login_startup_never_opens_windows_even_with_broken_settings() {
+        for values in [
+            vec![],
+            vec!["--show"],
+            vec!["--show", "--auto-launch"],
+            vec!["--auto-launch", "--show"],
+        ] {
+            let options = Options::parse_with_show(args(&values), true).unwrap();
+            for broken in [false, true] {
+                assert_eq!(
+                    options.startup_windows(true, broken),
+                    StartupWindows {
+                        panel: false,
+                        settings: false
+                    }
+                );
+                if options.auto_launch {
+                    assert_eq!(
+                        options.startup_windows(false, broken),
+                        StartupWindows {
+                            panel: false,
+                            settings: false
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn manual_show_and_settings_recovery_remain_available() {
+        let options = Options::parse_with_show(args(&["--show"]), false).unwrap();
+        assert_eq!(
+            options.startup_windows(false, false),
+            StartupWindows {
+                panel: true,
+                settings: false
+            }
+        );
+        assert_eq!(
+            options.startup_windows(false, true),
+            StartupWindows {
+                panel: true,
+                settings: true
+            }
+        );
+        let options = Options::parse_with_show(args(&[]), false).unwrap();
+        assert_eq!(
+            options.startup_windows(false, true),
+            StartupWindows {
+                panel: false,
+                settings: true
+            }
+        );
     }
 }

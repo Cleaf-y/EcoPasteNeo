@@ -22,7 +22,8 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", default-fe
 gpui-component = "=0.10.0"
 objc2 = "0.6"
 objc2-app-kit = "0.3"
-objc2-foundation = "0.3"
+objc2-foundation = { version = "0.3", features = ["objc2-core-services"] }
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
 raw-window-handle = "0.6"
 core-graphics = "0.24"
 core-foundation = "0.10"

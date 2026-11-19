@@ -7,6 +7,58 @@ pub enum Locale {
 }
 
 impl Locale {
+    pub fn login_title(self) -> &'static str {
+        self.text("登录时启动", "Launch at login")
+    }
+    pub fn login_hint(self) -> &'static str {
+        self.text("登录后在后台运行。状态以 macOS 为准；不会在下次启动时自动恢复被关闭的登录项。", "Run in the background after login. macOS owns this status; starting Neo will not re-enable a disabled login item.")
+    }
+    pub fn login_disabled(self) -> &'static str {
+        self.text("未注册", "Not registered")
+    }
+    pub fn login_enabled(self) -> &'static str {
+        self.text("已启用", "Enabled")
+    }
+    pub fn login_approval(self) -> &'static str {
+        self.text(
+            "需要在系统设置中批准",
+            "Approval required in System Settings",
+        )
+    }
+    pub fn login_not_found(self) -> &'static str {
+        self.text("系统未找到登录服务", "Login service not found")
+    }
+    pub fn login_unsupported(self) -> &'static str {
+        self.text(
+            "登录启动需要 macOS 13 或更新版本",
+            "Launch at login requires macOS 13 or later",
+        )
+    }
+    pub fn login_packaged_app(self) -> &'static str {
+        self.text(
+            "请从已签名的 EcoPasteNeo.app 设置登录启动",
+            "Configure login startup from the signed EcoPasteNeo.app",
+        )
+    }
+    pub fn login_unknown(self) -> &'static str {
+        self.text("无法识别系统登录项状态", "Unknown system login item status")
+    }
+    pub fn login_failed(self) -> &'static str {
+        self.text("无法更改登录启动", "Could not change login startup")
+    }
+    pub fn login_loading(self) -> &'static str {
+        self.text("正在查询 macOS 登录项…", "Querying macOS login item…")
+    }
+    pub fn login_refresh(self) -> &'static str {
+        self.text("刷新登录项状态", "Refresh login status")
+    }
+    pub fn login_system_settings(self) -> &'static str {
+        self.text("打开系统登录项设置", "Open Login Items in System Settings")
+    }
+    pub fn login_remove(self) -> &'static str {
+        self.text("移除登录项", "Remove login item")
+    }
+
     fn text(self, zh: &'static str, en: &'static str) -> &'static str {
         match self {
             Self::ZhCn => zh,
