@@ -44,6 +44,30 @@ impl Locale {
     pub fn saving(self) -> &'static str {
         self.text("正在保存…", "Saving…")
     }
+    pub fn excluded_apps(self) -> &'static str {
+        self.text("排除应用", "Excluded applications")
+    }
+    pub fn excluded_apps_hint(self) -> &'static str {
+        self.text("选择 .app 应用，按应用标识排除之后的复制。已有历史记录保留。", "Choose a .app to exclude future copies by application identifier. Existing history is kept.")
+    }
+    pub fn add_application(self) -> &'static str {
+        self.text("添加应用…", "Add application…")
+    }
+    pub fn remove_application(self) -> &'static str {
+        self.text("移除", "Remove")
+    }
+    pub fn clear_excluded_apps(self) -> &'static str {
+        self.text("清空排除列表", "Clear exclusions")
+    }
+    pub fn no_excluded_apps(self) -> &'static str {
+        self.text("未排除任何应用", "No applications excluded")
+    }
+    pub fn invalid_application(self) -> &'static str {
+        self.text(
+            "无法添加应用。请选择带有有效应用标识的 .app。",
+            "Could not add application. Choose a .app with a valid application identifier.",
+        )
+    }
     pub fn settings_error(self, unavailable: bool, error: &str) -> String {
         let label = if unavailable {
             self.text(

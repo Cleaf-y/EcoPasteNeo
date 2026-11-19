@@ -5,10 +5,11 @@ use ecopaste_neo_core::{
 };
 use gpui::{
     App, AppContext, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement, Styled, Task, Window, WindowBounds, WindowHandle,
-    WindowKind, WindowOptions, div, px, size,
+    PathPromptOptions, Render, StatefulInteractiveElement, Styled, Task, Window, WindowBounds,
+    WindowHandle, WindowKind, WindowOptions, div, px, size,
 };
 use gpui_component::{ActiveTheme, Disableable, Root, StyledExt, button::Button, switch::Switch};
+use objc2_foundation::{NSBundle, NSString};
 
 /// Retains the view and pending write across normal window close/recreation.
 pub struct SettingsWindow {
@@ -67,6 +68,8 @@ struct Preferences {
     saved: Option<Settings>,
     error: Option<String>,
     pending: Option<Task<()>>,
+    picker: Option<Task<()>>,
+    selection_error: bool,
 }
 
 impl Preferences {
@@ -77,6 +80,8 @@ impl Preferences {
             saved: None,
             error: None,
             pending: None,
+            picker: None,
+            selection_error: false,
         };
         view.sync();
         view
@@ -113,6 +118,50 @@ impl Preferences {
         self.await_update(pending, cx);
     }
 
+    /// Resolve the chosen bundle itself, never the app currently in front of Settings.
+    fn choose_excluded_app(&mut self, cx: &mut Context<Self>) {
+        if self.pending.is_some() || self.picker.is_some() || self.saved.is_none() {
+            return;
+        }
+        self.selection_error = false;
+        let selection = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(self.locale.add_application().into()),
+        });
+        let background = cx.background_executor().clone();
+        self.picker = Some(cx.spawn(async move |this, cx| {
+            let result = match selection.await {
+                Ok(Ok(Some(paths))) => background
+                    .spawn(async move {
+                        let path = paths.first()?;
+                        if path.extension()? != "app" {
+                            return None;
+                        }
+                        let bundle = NSBundle::bundleWithPath(&NSString::from_str(path.to_str()?))?;
+                        let id = bundle.bundleIdentifier()?.to_string();
+                        (!id.is_empty() && !id.chars().any(char::is_whitespace)).then_some(id)
+                    })
+                    .await
+                    .ok_or(())
+                    .map(Some),
+                Ok(Ok(None)) => Ok(None),
+                _ => Err(()),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.picker = None;
+                match result {
+                    Ok(Some(id)) => this.change(SettingsChange::AddExcludedApp(id), cx),
+                    Ok(None) => {}
+                    Err(()) => this.selection_error = true,
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
     /// Keep the operation alive across close and update this retained view on completion.
     fn await_update(
         &mut self,
@@ -145,7 +194,7 @@ impl Preferences {
 
 impl Render for Preferences {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let disabled = self.pending.is_some() || self.saved.is_none();
+        let disabled = self.pending.is_some() || self.picker.is_some() || self.saved.is_none();
         let settings = self.saved.clone().unwrap_or_default();
         let mut content = div()
             .id("settings")
@@ -196,6 +245,76 @@ impl Render for Preferences {
                     .on_change(cx.listener(move |this, checked, _, cx| {
                         this.change(SettingsChange::CaptureType(kind, *checked), cx)
                     })),
+            );
+        }
+        content = content
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .child(self.locale.excluded_apps()),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.locale.excluded_apps_hint()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_3()
+                    .child(
+                        Button::new("add-excluded-app")
+                            .label(self.locale.add_application())
+                            .disabled(disabled)
+                            .on_click(cx.listener(|this, _, _, cx| this.choose_excluded_app(cx))),
+                    )
+                    .child(
+                        Button::new("clear-excluded-apps")
+                            .label(self.locale.clear_excluded_apps())
+                            .disabled(disabled || settings.filters.excluded_app_ids.is_empty())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.change(SettingsChange::ClearExcludedApps, cx)
+                            })),
+                    ),
+            );
+        if let Some(settings) = &self.saved {
+            if settings.filters.excluded_app_ids.is_empty() {
+                content = content.child(div().text_sm().child(self.locale.no_excluded_apps()));
+            }
+            for (index, id) in settings.filters.excluded_app_ids.iter().enumerate() {
+                let id = id.clone();
+                content = content.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_sm()
+                                .truncate()
+                                .child(id.clone()),
+                        )
+                        .child(
+                            Button::new(("remove-excluded-app", index))
+                                .label(self.locale.remove_application())
+                                .disabled(disabled)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.change(SettingsChange::RemoveExcludedApp(id.clone()), cx)
+                                })),
+                        ),
+                );
+            }
+        }
+        if self.selection_error {
+            content = content.child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().danger)
+                    .child(self.locale.invalid_application()),
             );
         }
         if let Some(error) = &self.error {

@@ -35,10 +35,13 @@ impl Default for Settings {
 }
 
 /// A window sends only its edited field, never an old complete snapshot.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum SettingsChange {
     CaptureEnabled(bool),
     CaptureType(CaptureKind, bool),
+    AddExcludedApp(String),
+    RemoveExcludedApp(String),
+    ClearExcludedApps,
 }
 
 #[derive(Debug, Error)]
@@ -51,6 +54,8 @@ pub enum SettingsError {
     Json(#[from] serde_json::Error),
     #[error("settings must be a JSON object")]
     InvalidObject,
+    #[error("application identifier must not be empty or contain whitespace")]
+    InvalidAppId,
 }
 
 struct Loaded {
@@ -136,6 +141,27 @@ impl SettingsStore {
                     document["capture"] = serde_json::json!({});
                 }
                 document["capture"][key] = value.into();
+            }
+            change => {
+                let mut ids = loaded.settings.filters.excluded_app_ids.clone();
+                match change {
+                    SettingsChange::AddExcludedApp(id) => {
+                        let id = id.trim();
+                        if id.is_empty() || id.chars().any(char::is_whitespace) {
+                            return Err(SettingsError::InvalidAppId);
+                        }
+                        if !ids.iter().any(|existing| existing == id) {
+                            ids.push(id.to_owned());
+                        }
+                    }
+                    SettingsChange::RemoveExcludedApp(id) => ids.retain(|existing| existing != &id),
+                    SettingsChange::ClearExcludedApps => ids.clear(),
+                    _ => unreachable!(),
+                }
+                if document.get("filters").is_none() {
+                    document["filters"] = serde_json::json!({});
+                }
+                document["filters"]["excludedAppIds"] = serde_json::to_value(ids)?;
             }
         }
         let next = Self::parse(document)?;

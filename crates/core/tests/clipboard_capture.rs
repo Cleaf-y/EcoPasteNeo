@@ -49,6 +49,61 @@ fn source() -> ClipboardApp {
     }
 }
 
+/// The same synthetic payload is blocked only for a matching copied-from identifier.
+#[tokio::test]
+async fn saved_exclusions_gate_sources_and_removal_applies_to_next_capture() {
+    use ecopaste_neo_core::settings::{SettingsChange, SettingsStore};
+    let (_dir, paths, pool, images) = database().await;
+    let store = SettingsStore::open(&paths);
+    store
+        .update(SettingsChange::AddExcludedApp(source().id))
+        .unwrap();
+    let payload = text("EXCLUDED12-SAME-PAYLOAD");
+    let settings = store.capture_settings().unwrap();
+    assert!(
+        prepare_capture(&images, &payload, &settings, Some(source()), None)
+            .unwrap()
+            .is_none()
+    );
+    let mut browser = source();
+    browser.id = "test.browser".into();
+    // Identical display names must not cause a match.
+    let prepared = prepare_capture(&images, &payload, &settings, Some(browser.clone()), None)
+        .unwrap()
+        .unwrap();
+    let update = persist_capture(&pool, &prepared).await.unwrap();
+    assert_eq!(
+        find_item_by_id(&pool, &update.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .source_app_id,
+        Some(browser.id)
+    );
+    assert!(prepare_capture(&images, &payload, &settings, None, None)
+        .unwrap()
+        .is_some());
+    let reopened = SettingsStore::open(&paths);
+    assert!(!reopened
+        .capture_settings()
+        .unwrap()
+        .accepts_source(Some(&source())));
+    reopened
+        .update(SettingsChange::RemoveExcludedApp(source().id))
+        .unwrap();
+    let settings = reopened.capture_settings().unwrap();
+    assert!(
+        prepare_capture(&images, &payload, &settings, Some(source()), None)
+            .unwrap()
+            .is_some()
+    );
+    // Exclusions never delete an application's existing history.
+    reopened
+        .update(SettingsChange::AddExcludedApp("test.browser".into()))
+        .unwrap();
+    assert!(find_item_by_id(&pool, &update.id).await.unwrap().is_some());
+}
+
 fn prepared(store: &ImageStore, payload: &ClipboardPayload) -> PreparedCapture {
     prepare_capture(
         store,

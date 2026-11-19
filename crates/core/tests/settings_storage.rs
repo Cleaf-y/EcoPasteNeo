@@ -10,6 +10,111 @@ use ecopaste_neo_core::{
 use serde_json::{json, Value};
 
 #[test]
+fn excluded_apps_deduplicate_remove_and_stay_empty_after_restart() {
+    let parent = tempfile::tempdir().unwrap();
+    let paths = Storage::new(parent.path(), Environment::Dev)
+        .unwrap()
+        .open()
+        .unwrap();
+    let store = SettingsStore::open(&paths);
+    let original = store.snapshot().unwrap();
+    #[cfg(target_os = "macos")]
+    assert_eq!(
+        original.filters.excluded_app_ids,
+        ["com.apple.keychainaccess", "com.apple.Passwords"]
+    );
+    for id in [
+        "com.apple.TextEdit",
+        "com.example.browser",
+        "com.apple.TextEdit",
+    ] {
+        store
+            .update(SettingsChange::AddExcludedApp(id.into()))
+            .unwrap();
+    }
+    let ids = store.snapshot().unwrap().filters.excluded_app_ids;
+    assert_eq!(
+        ids.iter().filter(|id| *id == "com.apple.TextEdit").count(),
+        1
+    );
+    store
+        .update(SettingsChange::RemoveExcludedApp(
+            "com.apple.TextEdit".into(),
+        ))
+        .unwrap();
+    let reopened = SettingsStore::open(&paths);
+    assert!(!reopened
+        .capture_settings()
+        .unwrap()
+        .excluded_app_ids
+        .contains(&"com.apple.TextEdit".into()));
+    assert!(reopened
+        .capture_settings()
+        .unwrap()
+        .excluded_app_ids
+        .contains(&"com.example.browser".into()));
+    reopened.update(SettingsChange::ClearExcludedApps).unwrap();
+    let reopened = SettingsStore::open(&paths);
+    let settings = reopened.snapshot().unwrap();
+    assert!(settings.filters.excluded_app_ids.is_empty());
+    assert_eq!(settings.capture_enabled, original.capture_enabled);
+    assert_eq!(settings.capture, original.capture);
+    assert_eq!(settings.sensitive, original.sensitive);
+    let document: Value =
+        serde_json::from_slice(&fs::read(paths.settings_path()).unwrap()).unwrap();
+    assert_eq!(document["filters"]["excludedAppIds"], json!([]));
+    for id in ["", " ", "com.example.some app"] {
+        assert!(reopened
+            .update(SettingsChange::AddExcludedApp(id.into()))
+            .is_err());
+        assert!(reopened
+            .capture_settings()
+            .unwrap()
+            .excluded_app_ids
+            .is_empty());
+    }
+}
+
+#[test]
+fn exclusion_actions_merge_latest_list_and_preserve_unknown_filter_fields() {
+    let parent = tempfile::tempdir().unwrap();
+    let paths = Storage::new(parent.path(), Environment::Dev)
+        .unwrap()
+        .open()
+        .unwrap();
+    fs::write(paths.settings_path(), br#"{"filters":{"futureRule":42}}"#).unwrap();
+    let store = std::sync::Arc::new(SettingsStore::open(&paths));
+    std::thread::scope(|scope| {
+        for id in ["test.one", "test.two", "test.one"] {
+            let store = store.clone();
+            scope.spawn(move || {
+                store
+                    .update(SettingsChange::AddExcludedApp(id.into()))
+                    .unwrap()
+            });
+        }
+    });
+    let ids = store.snapshot().unwrap().filters.excluded_app_ids;
+    for id in ["test.one", "test.two"] {
+        assert_eq!(ids.iter().filter(|saved| *saved == id).count(), 1);
+    }
+    let before = fs::read(paths.settings_path()).unwrap();
+    let backup = paths.settings_path().with_extension("saved");
+    fs::rename(paths.settings_path(), &backup).unwrap();
+    fs::create_dir(paths.settings_path()).unwrap();
+    assert!(store.update(SettingsChange::ClearExcludedApps).is_err());
+    assert_eq!(store.capture_settings().unwrap().excluded_app_ids, ids);
+    fs::remove_dir(paths.settings_path()).unwrap();
+    fs::rename(backup, paths.settings_path()).unwrap();
+    assert_eq!(fs::read(paths.settings_path()).unwrap(), before);
+    store.update(SettingsChange::ClearExcludedApps).unwrap();
+    let document: Value =
+        serde_json::from_slice(&fs::read(paths.settings_path()).unwrap()).unwrap();
+    assert_eq!(document["filters"]["futureRule"], 42);
+    assert_eq!(document["filters"]["excludedAppIds"], json!([]));
+}
+
+#[test]
 fn defaults_reopen_environment_isolation_and_legacy_file_untouched() {
     let parent = tempfile::tempdir().unwrap();
     let legacy = parent
