@@ -347,3 +347,46 @@ fn dangling_settings_link_is_not_replaced_by_first_run_defaults() {
     assert_eq!(fs::read_link(paths.settings_path()).unwrap(), target);
     assert!(!target.exists());
 }
+
+#[test]
+fn sensitive_changes_preserve_independent_rules_and_failed_saves() {
+    let parent = tempfile::tempdir().unwrap();
+    let paths = Storage::new(parent.path(), Environment::Dev)
+        .unwrap()
+        .open()
+        .unwrap();
+    fs::write(
+        paths.settings_path(),
+        br#"{"sensitive":{"futureRule":7},"filters":{"excludedAppIds":["test.excluded"]}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(&paths);
+    let initial = store.snapshot().unwrap();
+    assert!(initial.sensitive.collect_secrets && initial.sensitive.redact_secrets);
+    for collect in [false, true] {
+        for redact in [false, true] {
+            store
+                .update(SettingsChange::CollectSecrets(collect))
+                .unwrap();
+            store.update(SettingsChange::RedactSecrets(redact)).unwrap();
+            let reopened = SettingsStore::open(&paths).snapshot().unwrap();
+            assert_eq!(reopened.sensitive.collect_secrets, collect);
+            assert_eq!(reopened.sensitive.redact_secrets, redact);
+            assert_eq!(reopened.filters, initial.filters);
+            assert_eq!(reopened.capture, initial.capture);
+            assert_eq!(reopened.capture_enabled, initial.capture_enabled);
+        }
+    }
+    let before = store.snapshot().unwrap();
+    let backup = paths.settings_path().with_extension("saved");
+    fs::rename(paths.settings_path(), &backup).unwrap();
+    fs::create_dir(paths.settings_path()).unwrap();
+    assert!(store.update(SettingsChange::RedactSecrets(false)).is_err());
+    assert!(store.update(SettingsChange::CollectSecrets(false)).is_err());
+    assert_eq!(store.snapshot().unwrap().sensitive, before.sensitive);
+    fs::remove_dir(paths.settings_path()).unwrap();
+    fs::rename(backup, paths.settings_path()).unwrap();
+    let document: Value =
+        serde_json::from_slice(&fs::read(paths.settings_path()).unwrap()).unwrap();
+    assert_eq!(document["sensitive"]["futureRule"], 7);
+}

@@ -6,7 +6,7 @@ use global_hotkey::{
 use objc2::MainThreadMarker;
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{Menu, MenuEvent, MenuId, MenuItem},
+    menu::{Menu, MenuEvent, MenuId, MenuItem, Submenu},
 };
 
 #[derive(Clone, Debug)]
@@ -25,6 +25,7 @@ pub struct SystemIntegration {
     hotkey: HotKey,
     tray: TrayIcon,
     _menu: Menu,
+    _application_menu: Menu,
     show: MenuItem,
     settings: MenuItem,
     quit: MenuItem,
@@ -45,6 +46,15 @@ impl SystemIntegration {
         let settings = MenuItem::new(locale.settings_title(), true, None);
         let menu = Menu::with_items(&[&show, &settings, &quit])
             .context("Could not build the tray menu")?;
+        let application = Submenu::with_items(
+            ecopaste_neo_core::identity::PRODUCT_NAME,
+            true,
+            &[&show, &settings, &quit],
+        )
+        .context("Could not build the application menu")?;
+        let application_menu =
+            Menu::with_items(&[&application]).context("Could not build the menu bar")?;
+        application_menu.init_for_nsapp();
         let tray = TrayIconBuilder::new()
             .with_tooltip("EcoPasteNeo — Ctrl+Alt+Cmd+V")
             .with_title("Neo")
@@ -63,6 +73,7 @@ impl SystemIntegration {
             hotkey,
             tray,
             _menu: menu,
+            _application_menu: application_menu,
             show,
             settings,
             quit,

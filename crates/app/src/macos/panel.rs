@@ -127,6 +127,15 @@ impl HistoryPanel {
         view
     }
 
+    /// Re-measure cards and revoke old preview results after committed display changes.
+    pub fn settings_saved(&mut self, cx: &mut Context<Self>) {
+        self.list.reset(self.state.rows.len());
+        if let Some(preview) = &self.preview {
+            preview.settings_saved(cx);
+        }
+        cx.notify();
+    }
+
     pub fn visible(&self) -> bool {
         self.visible
     }
@@ -539,11 +548,22 @@ impl HistoryPanel {
             .child(header);
         match row.item.kind {
             ClipboardKind::Text => {
-                card = card.child(div().whitespace_normal().child(if row.item.is_sensitive {
-                    "••••••••".to_owned()
-                } else {
-                    row.item.summary.clone().unwrap_or_default()
-                }));
+                card = card.child(
+                    div().whitespace_normal().child(
+                        if row.item.is_sensitive
+                            && self
+                                .source
+                                .settings()
+                                .snapshot()
+                                .map(|s| s.sensitive.redact_secrets)
+                                .unwrap_or(true)
+                        {
+                            "••••••••".to_owned()
+                        } else {
+                            row.item.summary.clone().unwrap_or_default()
+                        },
+                    ),
+                );
             }
             ClipboardKind::Image => {
                 let width = row.item.width.unwrap_or(1).max(1) as f32;

@@ -38,6 +38,8 @@ impl Default for Settings {
 #[derive(Debug, Clone)]
 pub enum SettingsChange {
     CaptureEnabled(bool),
+    CollectSecrets(bool),
+    RedactSecrets(bool),
     CaptureType(CaptureKind, bool),
     AddExcludedApp(String),
     RemoveExcludedApp(String),
@@ -142,7 +144,20 @@ impl SettingsStore {
                 }
                 document["capture"][key] = value.into();
             }
-            change => {
+            change @ (SettingsChange::CollectSecrets(_) | SettingsChange::RedactSecrets(_)) => {
+                let (key, value) = match change {
+                    SettingsChange::CollectSecrets(value) => ("collectSecrets", value),
+                    SettingsChange::RedactSecrets(value) => ("redactSecrets", value),
+                    _ => unreachable!(),
+                };
+                if document.get("sensitive").is_none() {
+                    document["sensitive"] = serde_json::json!({});
+                }
+                document["sensitive"][key] = value.into();
+            }
+            change @ (SettingsChange::AddExcludedApp(_)
+            | SettingsChange::RemoveExcludedApp(_)
+            | SettingsChange::ClearExcludedApps) => {
                 let mut ids = loaded.settings.filters.excluded_app_ids.clone();
                 match change {
                     SettingsChange::AddExcludedApp(id) => {

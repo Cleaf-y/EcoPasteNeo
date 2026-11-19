@@ -122,6 +122,22 @@ mod tests {
     }
 
     #[test]
+    fn redaction_reload_clears_original_and_rejects_older_unmasked_result() {
+        let mut state = PreviewState::default();
+        let exposed = state.begin("sensitive".into());
+        state.complete(
+            exposed,
+            Ok(PreviewContent::Text("synthetic original".into())),
+        );
+        let pending = state.begin("sensitive".into());
+        let masked = state.begin("sensitive".into());
+        assert!(state.content.is_none());
+        assert!(!state.complete(pending, Ok(PreviewContent::Text("stale original".into()))));
+        assert!(state.complete(masked, Ok(PreviewContent::Hidden)));
+        assert!(matches!(state.content, Some(PreviewContent::Hidden)));
+    }
+
+    #[test]
     fn bounded_rows_keep_unicode_and_the_long_text_tail() {
         let text = format!("{}\n\nEND-OF-PREVIEW", "中文与🌲".repeat(1000));
         let rows = text_rows(&text);

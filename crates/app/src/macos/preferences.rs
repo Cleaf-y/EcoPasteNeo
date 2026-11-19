@@ -4,9 +4,9 @@ use ecopaste_neo_core::{
     settings::{Settings, SettingsChange},
 };
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    PathPromptOptions, Render, StatefulInteractiveElement, Styled, Task, Window, WindowBounds,
-    WindowHandle, WindowKind, WindowOptions, div, px, size,
+    App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
+    ParentElement, PathPromptOptions, Render, StatefulInteractiveElement, Styled, Task, Window,
+    WindowBounds, WindowHandle, WindowKind, WindowOptions, div, px, size,
 };
 use gpui_component::{ActiveTheme, Disableable, Root, StyledExt, button::Button, switch::Switch};
 use objc2_foundation::{NSBundle, NSString};
@@ -18,7 +18,17 @@ pub struct SettingsWindow {
     locale: Locale,
 }
 
+struct SettingsSaved;
+
+impl EventEmitter<SettingsSaved> for Preferences {}
+
 impl SettingsWindow {
+    /// Notify consumers only after a save or explicit reload succeeds.
+    pub fn on_saved(&self, mut callback: impl FnMut(&mut App) + 'static, cx: &mut App) {
+        cx.subscribe(&self.view, move |_, _: &SettingsSaved, cx| callback(cx))
+            .detach();
+    }
+
     pub fn new(source: HistorySource, locale: Locale, cx: &mut App) -> Self {
         let view = cx.new(|_| Preferences::new(source, locale));
         Self {
@@ -179,6 +189,7 @@ impl Preferences {
                     Ok(settings) => {
                         this.saved = Some(settings);
                         this.error = None;
+                        cx.emit(SettingsSaved);
                     }
                     Err(error) => {
                         this.saved = this.source.settings().snapshot().ok();
@@ -247,6 +258,31 @@ impl Render for Preferences {
                     })),
             );
         }
+        content = content
+            .child(
+                Switch::new("collect-secrets")
+                    .label(self.locale.collect_secrets())
+                    .checked(self.saved.is_some() && settings.sensitive.collect_secrets)
+                    .disabled(disabled)
+                    .on_change(cx.listener(|this, checked, _, cx| {
+                        this.change(SettingsChange::CollectSecrets(*checked), cx)
+                    })),
+            )
+            .child(
+                Switch::new("redact-secrets")
+                    .label(self.locale.redact_secrets())
+                    .checked(self.saved.is_some() && settings.sensitive.redact_secrets)
+                    .disabled(disabled)
+                    .on_change(cx.listener(|this, checked, _, cx| {
+                        this.change(SettingsChange::RedactSecrets(*checked), cx)
+                    })),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.locale.sensitive_hint()),
+            );
         content = content
             .child(
                 div()

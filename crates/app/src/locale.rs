@@ -41,6 +41,18 @@ impl Locale {
             CaptureKind::Files => self.files(),
         }
     }
+    pub fn collect_secrets(self) -> &'static str {
+        self.text("收录识别出的敏感内容", "Collect detected sensitive content")
+    }
+    pub fn redact_secrets(self) -> &'static str {
+        self.text(
+            "在列表和预览中遮盖敏感内容",
+            "Mask sensitive content in history and preview",
+        )
+    }
+    pub fn sensitive_hint(self) -> &'static str {
+        self.text("仅使用现有识别规则，不保证识别所有密码。关闭收录只影响之后的复制。遮盖不是加密，不改变主动粘贴的内容。", "Existing detection rules cannot identify every password. Disabling collection affects future copies. Masking is not encryption and does not change content you paste.")
+    }
     pub fn saving(self) -> &'static str {
         self.text("正在保存…", "Saving…")
     }

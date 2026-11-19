@@ -189,10 +189,11 @@ pub enum PreviewContent {
 pub fn record_content(
     paths: &DataPaths,
     item: &crate::db::models::ClipboardItem,
+    redact_secrets: bool,
 ) -> PreviewContent {
     use crate::{content::ClipboardSubKind, db::models::ClipboardKind};
 
-    if item.is_sensitive {
+    if item.is_sensitive && redact_secrets {
         return PreviewContent::Hidden;
     }
     match item.kind {

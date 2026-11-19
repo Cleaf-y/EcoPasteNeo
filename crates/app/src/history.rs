@@ -204,11 +204,19 @@ impl HistorySource {
     pub fn preview(&self, id: String) -> tokio::task::JoinHandle<Result<preview::PreviewContent>> {
         let pool = self.pool.clone();
         let paths = self.paths.clone();
+        let settings = self.settings.clone();
         self.runtime.spawn(async move {
             let item = db::items::find_item_by_id(&pool, &id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("History item no longer exists"))?;
-            Ok(tokio::task::spawn_blocking(move || preview::record_content(&paths, &item)).await?)
+            let redact = settings
+                .snapshot()
+                .map(|settings| settings.sensitive.redact_secrets)
+                .unwrap_or(true);
+            Ok(
+                tokio::task::spawn_blocking(move || preview::record_content(&paths, &item, redact))
+                    .await?,
+            )
         })
     }
 
@@ -621,6 +629,57 @@ mod preview_tests {
                 .is_err()
         );
         source.runtime.block_on(source.pool.close());
+    }
+
+    #[test]
+    fn saved_redaction_changes_preview_without_changing_sensitive_mark_or_writeback() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = source(temporary.path());
+        insert(
+            &source,
+            "sensitive13",
+            "text",
+            None,
+            "synthetic original",
+            Some("synthetic original"),
+            true,
+        );
+        for collect in [false, true] {
+            source
+                .settings()
+                .update(SettingsChange::CollectSecrets(collect))
+                .unwrap();
+            for redact in [false, true] {
+                source
+                    .settings()
+                    .update(SettingsChange::RedactSecrets(redact))
+                    .unwrap();
+                let content = preview(&source, "sensitive13");
+                assert_eq!(matches!(content, PreviewContent::Hidden), redact);
+                let write = source
+                    .runtime
+                    .block_on(source.prepare_write("sensitive13".into(), false))
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    matches!(write.payload, ecopaste_neo_core::clipboard::write::WritePayload::Text { plain, .. } if plain == "synthetic original")
+                );
+                let item = source
+                    .runtime
+                    .block_on(db::items::find_item_by_id(&source.pool, "sensitive13"))
+                    .unwrap()
+                    .unwrap();
+                assert!(item.is_sensitive);
+            }
+        }
+        source.runtime.block_on(source.pool.close());
+        drop(source);
+        let reopened = self::source(temporary.path());
+        assert!(matches!(
+            preview(&reopened, "sensitive13"),
+            PreviewContent::Hidden
+        ));
+        reopened.runtime.block_on(reopened.pool.close());
     }
 
     #[test]

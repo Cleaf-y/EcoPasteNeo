@@ -66,6 +66,17 @@ impl PreviewWindow {
         })
     }
 
+    /// Reload the open record without moving focus, showing a window, or recapturing a target.
+    pub fn settings_saved(&self, cx: &mut App) {
+        self.view.update(cx, |view, cx| {
+            if view.state.open
+                && let Some(id) = view.state.id.clone()
+            {
+                view.load(id, cx);
+            }
+        });
+    }
+
     pub fn is_open(&self, cx: &App) -> bool {
         self.view.read(cx).state.open
     }
@@ -142,6 +153,12 @@ impl RecordPreview {
         let request = self.state.begin(id.clone());
         self.rows.clear();
         self.list.reset(0);
+        let redact = self
+            .source
+            .settings()
+            .snapshot()
+            .map(|s| s.sensitive.redact_secrets)
+            .unwrap_or(true);
         let pending = self.source.preview(id);
         self.request = Some(cx.spawn(async move |this, cx| {
             let result = match pending.await {
@@ -149,6 +166,15 @@ impl RecordPreview {
                 Err(error) => Err(error.into()),
             };
             let _ = this.update(cx, |this, cx| {
+                let current = this
+                    .source
+                    .settings()
+                    .snapshot()
+                    .map(|s| s.sensitive.redact_secrets)
+                    .unwrap_or(true);
+                if current != redact {
+                    return;
+                }
                 if !this.state.complete(request, result) {
                     return;
                 }

@@ -66,6 +66,13 @@ pub fn run() -> Result<()> {
             )
             .expect("Cannot create EcoPasteNeo panel");
         let panel = panel.expect("Panel view must exist");
+        let settings_panel = panel.downgrade();
+        settings.on_saved(
+            move |cx| {
+                let _ = settings_panel.update(cx, |view, cx| view.settings_saved(cx));
+            },
+            cx,
+        );
         if settings_unavailable && let Err(error) = settings.show(cx) {
             eprintln!("Could not show settings: {error:#}");
         }
@@ -86,8 +93,6 @@ pub fn run() -> Result<()> {
                         return;
                     }
                     if matches!(action, SystemAction::Settings) {
-                        let _ = handle
-                            .update(cx, |_, _, cx| panel.update(cx, |view, cx| view.hide(cx)));
                         cx.update(|cx| {
                             if let Err(error) = settings.show(cx) {
                                 eprintln!("Could not show settings: {error:#}");

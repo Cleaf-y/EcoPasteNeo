@@ -446,3 +446,86 @@ fn settings_keep_legacy_defaults_serialization_and_payloads_are_send() {
     assert_eq!(json["sensitive"]["collectSecrets"], true);
     assert_eq!(json["sensitive"]["redactSecrets"], true);
 }
+
+#[cfg(feature = "preview")]
+/// Synthetic labeled values exercise detection without any provider credential.
+#[tokio::test]
+async fn saved_sensitive_combinations_keep_originals_and_respect_source_exclusion() {
+    use ecopaste_neo_core::{
+        preview::{record_content, PreviewContent},
+        settings::{SettingsChange, SettingsStore},
+    };
+    let (_dir, paths, pool, images) = database().await;
+    let store = SettingsStore::open(&paths);
+    let mut saved = Vec::new();
+    for collect in [false, true] {
+        for redact in [false, true] {
+            store
+                .update(SettingsChange::CollectSecrets(collect))
+                .unwrap();
+            store.update(SettingsChange::RedactSecrets(redact)).unwrap();
+            let value = format!(
+                "client_secret = dummy_without_permissions_{}_{}",
+                collect, redact
+            );
+            let payload = text(&value);
+            let settings = store.capture_settings().unwrap();
+            let prepared =
+                prepare_capture(&images, &payload, &settings, Some(source()), None).unwrap();
+            if collect {
+                let prepared = prepared.unwrap();
+                let update = persist_capture(&pool, &prepared).await.unwrap();
+                saved.push(update.id);
+            } else {
+                assert!(prepared.is_none());
+            }
+            for id in &saved {
+                let item = find_item_by_id(&pool, id).await.unwrap().unwrap();
+                assert!(item.is_sensitive);
+                if redact {
+                    assert!(matches!(
+                        record_content(&paths, &item, redact),
+                        PreviewContent::Hidden
+                    ));
+                } else {
+                    assert!(
+                        matches!(record_content(&paths, &item, redact), PreviewContent::Text(value) if value == item.content)
+                    );
+                }
+            }
+            let ordinary = prepare_capture(
+                &images,
+                &text("ordinary harmless note"),
+                &settings,
+                Some(source()),
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            let update = persist_capture(&pool, &ordinary).await.unwrap();
+            let item = find_item_by_id(&pool, &update.id).await.unwrap().unwrap();
+            assert!(!item.is_sensitive);
+            assert!(matches!(
+                record_content(&paths, &item, redact),
+                PreviewContent::Text(_)
+            ));
+        }
+    }
+    store.update(SettingsChange::CollectSecrets(true)).unwrap();
+    store
+        .update(SettingsChange::AddExcludedApp(source().id))
+        .unwrap();
+    let settings = store.capture_settings().unwrap();
+    let payload = text("client_secret = dummy_without_permissions_excluded");
+    assert!(
+        prepare_capture(&images, &payload, &settings, Some(source()), None)
+            .unwrap()
+            .is_none()
+    );
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM clipboard_items WHERE is_sensitive = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(count, 2);
+}
