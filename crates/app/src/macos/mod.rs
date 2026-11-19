@@ -1,6 +1,5 @@
 mod drag_out;
 mod history_menu;
-mod hotkey_probe;
 mod native;
 mod panel;
 mod paste;

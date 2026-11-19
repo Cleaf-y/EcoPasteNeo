@@ -1,12 +1,8 @@
 //! Explicit macOS shortcut-conflict fixture. No keyboard injection or clipboard access.
 #[cfg(target_os = "macos")]
-#[path = "../src/macos/hotkey_probe.rs"]
-mod hotkey_probe;
-
-#[cfg(target_os = "macos")]
 fn main() -> anyhow::Result<()> {
     use core_foundation::runloop::{CFRunLoop, kCFRunLoopDefaultMode};
-    use global_hotkey::hotkey::HotKey;
+    use global_hotkey::{GlobalHotKeyManager, hotkey::HotKey};
     use std::{
         io,
         sync::{
@@ -21,12 +17,13 @@ fn main() -> anyhow::Result<()> {
         .parse()?;
     let marker = objc2::MainThreadMarker::new().expect("main thread");
     let _application = objc2_app_kit::NSApplication::sharedApplication(marker);
+    let manager = GlobalHotKeyManager::new()?;
+    manager.register(key)?;
     if std::env::args().any(|arg| arg == "--probe") {
-        hotkey_probe::check_available(key, ecopaste_neo_app::locale::Locale::EnUs)?;
+        manager.unregister(key)?;
         println!("Combination is available: {key}");
         return Ok(());
     }
-    let reservation = hotkey_probe::reserve_exclusive(key, ecopaste_neo_app::locale::Locale::EnUs)?;
     println!("Reserved {key}; press Enter to release and exit.");
     let stop = Arc::new(AtomicBool::new(false));
     let signal = stop.clone();
@@ -40,7 +37,7 @@ fn main() -> anyhow::Result<()> {
             CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, Duration::from_millis(100), false);
         }
     }
-    drop(reservation);
+    manager.unregister(key)?;
     Ok(())
 }
 #[cfg(not(target_os = "macos"))]

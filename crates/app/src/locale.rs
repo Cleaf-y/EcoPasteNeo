@@ -55,6 +55,15 @@ impl Locale {
     pub fn shortcut_conflict(self) -> &'static str {
         self.text("无法注册该组合键，可能已被占用。原设置和有效的旧快捷键保留。", "Could not register this combination; it may be in use. Previous settings and any active shortcut are retained.")
     }
+    pub fn shortcut_registration_failed(self, reason: &str) -> String {
+        format!(
+            "{}: {reason}",
+            self.text(
+                "无法启用组合键，原设置保留",
+                "Could not activate the combination; previous settings are retained"
+            )
+        )
+    }
     pub fn shortcut_invalid(self) -> &'static str {
         self.text(
             "请选择包含修饰键和普通按键的有效组合。",
@@ -79,6 +88,8 @@ impl Locale {
             .replace("Shift+", "⇧")
             .replace("super+", "⌘")
             .replace("Super+", "⌘")
+            .replace("meta+", "⌘")
+            .replace("Meta+", "⌘")
             .replace("Key", "")
             .replace("Digit", "")
     }

@@ -43,10 +43,8 @@ mod macos {
 
     use std::path::PathBuf;
 
-    use objc2::msg_send;
-    use objc2::rc::{autoreleasepool, Retained};
+    use objc2::rc::autoreleasepool;
     use objc2_app_kit::{NSRunningApplication, NSWorkspace};
-    use objc2_foundation::{NSString, NSURL};
 
     pub(super) fn detect() -> Option<FrontmostApp> {
         autoreleasepool(|_| {
@@ -60,7 +58,7 @@ mod macos {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| id.clone());
 
-            let path = unsafe { bundle_path(&app) };
+            let path = bundle_path(&app);
 
             Some(FrontmostApp {
                 id,
@@ -71,13 +69,9 @@ mod macos {
         })
     }
 
-    /// 通过 NSRunningApplication.bundleURL 拿到 .app 路径。objc2-app-kit 当前 feature 没生成
-    /// 该 getter，只能 msg_send!；返回 NSURL 后用 path 取 NSString → Rust String。
-    unsafe fn bundle_path(app: &NSRunningApplication) -> Option<PathBuf> {
-        let url: Option<Retained<NSURL>> = msg_send![app, bundleURL];
-        let url = url?;
-        let path: Option<Retained<NSString>> = msg_send![&*url, path];
-        Some(PathBuf::from(path?.to_string()))
+    /// Read the bundle path independently; a missing URL must not discard its identifier.
+    fn bundle_path(app: &NSRunningApplication) -> Option<PathBuf> {
+        Some(PathBuf::from(app.bundleURL()?.path()?.to_string()))
     }
 }
 

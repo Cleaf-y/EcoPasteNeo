@@ -2,7 +2,10 @@ use super::shortcut::ModifierListener;
 use anyhow::{Context, Result};
 use ecopaste_neo_app::locale::Locale;
 use ecopaste_neo_core::panel_shortcut::PanelShortcut;
-use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
+use global_hotkey::{
+    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
+    hotkey::{Code, HotKey},
+};
 use objc2::MainThreadMarker;
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
@@ -160,10 +163,9 @@ impl SystemIntegration {
                 if matches!(&self.active,Some(Activation::Combination(old)) if old.id()==key.id()) {
                     None
                 } else {
-                    super::hotkey_probe::check_available(key, self.locale)?;
                     self.manager
                         .register(key)
-                        .map_err(|_| anyhow::anyhow!("{}", self.locale.shortcut_conflict()))?;
+                        .map_err(|error| registration_error(error, self.locale))?;
                     Some(Activation::Combination(key))
                 }
             }
@@ -300,8 +302,78 @@ pub fn parse_combination(key: &str, locale: Locale) -> Result<HotKey> {
     let key: HotKey = key
         .parse()
         .map_err(|_| anyhow::anyhow!("{}", locale.shortcut_invalid()))?;
-    if key.mods.is_empty() || super::hotkey_probe::scan_code(&key.key.to_string()).is_none() {
+    if key.mods.is_empty()
+        || matches!(
+            key.key,
+            Code::MediaPlayPause
+                | Code::MediaTrackNext
+                | Code::MediaTrackPrevious
+                | Code::MediaFastForward
+                | Code::MediaRewind
+        )
+    {
         anyhow::bail!("{}", locale.shortcut_invalid());
     }
     Ok(key)
+}
+
+/// Occupancy is actionable separately from an unsupported key or native API failure.
+fn registration_error(error: global_hotkey::Error, locale: Locale) -> anyhow::Error {
+    match error {
+        global_hotkey::Error::AlreadyRegistered(_) => {
+            anyhow::anyhow!("{}", locale.shortcut_conflict())
+        }
+        error => anyhow::anyhow!(
+            "{}",
+            locale.shortcut_registration_failed(&error.to_string())
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use global_hotkey::hotkey::Modifiers;
+
+    #[test]
+    fn legacy_super_keeps_command_semantics_and_display() {
+        for value in ["Control+Alt+Super+KeyV", "control+alt+super+KeyN"] {
+            let key = parse_combination(value, Locale::ZhCn).unwrap();
+            assert!(key.mods.contains(Modifiers::META));
+            assert!(key.mods.contains(Modifiers::CONTROL | Modifiers::ALT));
+            assert_eq!(key.to_string().parse::<HotKey>().unwrap(), key);
+            let label = Locale::ZhCn.combination_label(&key.to_string());
+            assert!(label.starts_with("⌃⌥⌘"), "{label}");
+            assert!(!label.contains("meta"));
+        }
+    }
+
+    #[test]
+    fn occupied_and_other_registration_errors_remain_distinct() {
+        let key = parse_combination("Control+Super+KeyV", Locale::EnUs).unwrap();
+        let conflict =
+            registration_error(global_hotkey::Error::AlreadyRegistered(key), Locale::EnUs)
+                .to_string();
+        assert_eq!(conflict, Locale::EnUs.shortcut_conflict());
+        let failure = registration_error(
+            global_hotkey::Error::FailedToRegister("native fixture failure".into()),
+            Locale::EnUs,
+        )
+        .to_string();
+        assert!(failure.contains("native fixture failure"));
+        assert_ne!(failure, conflict);
+    }
+
+    #[test]
+    fn combinations_cannot_enable_media_key_monitoring() {
+        for key in [
+            "MediaPlayPause",
+            "MediaTrackNext",
+            "MediaTrackPrevious",
+            "MediaFastForward",
+            "MediaRewind",
+        ] {
+            assert!(parse_combination(&format!("Control+{key}"), Locale::EnUs).is_err());
+        }
+    }
 }
