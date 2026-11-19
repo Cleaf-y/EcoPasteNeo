@@ -13,6 +13,101 @@ impl Locale {
             Self::EnUs => en,
         }
     }
+    pub fn shortcut_title(self) -> &'static str {
+        self.text("历史面板全局快捷键", "Global history panel shortcut")
+    }
+    pub fn shortcut_combination(self) -> &'static str {
+        self.text("组合键", "Key combination")
+    }
+    pub fn shortcut_double(self) -> &'static str {
+        self.text("双击修饰键", "Double-tap modifier")
+    }
+    pub fn shortcut_combination_hint(self) -> &'static str {
+        self.text(
+            "也可输入组合名称（如 Control+Alt+Super+KeyV）。点击保存后生效。",
+            "Or enter a combination (e.g. Control+Alt+Super+KeyV). Save to apply.",
+        )
+    }
+    pub fn shortcut_record(self) -> &'static str {
+        self.text("录入组合键", "Record combination")
+    }
+    pub fn shortcut_recording(self) -> &'static str {
+        self.text(
+            "请按组合键；Esc 取消。录入期间暂停全局唤出。",
+            "Press a combination; Esc cancels. Global activation is paused while recording.",
+        )
+    }
+    pub fn shortcut_permission(self) -> &'static str {
+        self.text("双击需要输入监控权限，只观察按键状态，不记录输入。请在系统设置中允许当前 EcoPasteNeo 后重试；原快捷键仍保留。", "Double-tap requires Input Monitoring to observe key state without recording input. Allow this EcoPasteNeo in System Settings and retry; the previous shortcut is retained.")
+    }
+    pub fn shortcut_double_hint(self) -> &'static str {
+        self.text("选择修饰键后点保存。仅双击模式需要输入监控权限；只读监听，不拦截或记录输入。", "Choose a modifier and save. Only double-tap needs Input Monitoring; observation is read-only and does not intercept or record input.")
+    }
+    pub fn shortcut_listener_failed(self) -> &'static str {
+        self.text("双击监听不可用或权限已撤销。可从菜单进入设置，改用组合键。", "Double-tap monitoring is unavailable or permission was revoked. Open Settings from the menu to choose a combination.")
+    }
+    pub fn shortcut_settings_unavailable(self) -> &'static str {
+        self.text(
+            "设置不可用，请修复后重试。",
+            "Settings unavailable; repair and retry.",
+        )
+    }
+    pub fn shortcut_conflict(self) -> &'static str {
+        self.text("无法注册该组合键，可能已被占用。原设置和有效的旧快捷键保留。", "Could not register this combination; it may be in use. Previous settings and any active shortcut are retained.")
+    }
+    pub fn shortcut_invalid(self) -> &'static str {
+        self.text(
+            "请选择包含修饰键和普通按键的有效组合。",
+            "Choose a valid combination with a modifier and a standard key.",
+        )
+    }
+    pub fn shortcut_inactive(self) -> &'static str {
+        self.text("全局快捷键未生效", "Global shortcut inactive")
+    }
+    pub fn shortcut_default(self) -> &'static str {
+        self.text("恢复默认组合", "Default combination")
+    }
+    pub fn shortcut_effective(self, description: &str) -> String {
+        format!("{}: {description}", self.text("当前生效", "Active"))
+    }
+    pub fn combination_label(self, key: &str) -> String {
+        key.replace("control+", "⌃")
+            .replace("Control+", "⌃")
+            .replace("alt+", "⌥")
+            .replace("Alt+", "⌥")
+            .replace("shift+", "⇧")
+            .replace("Shift+", "⇧")
+            .replace("super+", "⌘")
+            .replace("Super+", "⌘")
+            .replace("Key", "")
+            .replace("Digit", "")
+    }
+    pub fn modifier_label(
+        self,
+        modifier: ecopaste_neo_core::panel_shortcut::TapModifier,
+    ) -> &'static str {
+        use ecopaste_neo_core::panel_shortcut::TapModifier::*;
+        match modifier {
+            Control => "Control",
+            Option => "Option",
+            Shift => "Shift",
+            Command => "Command",
+        }
+    }
+    pub fn shortcut_label(
+        self,
+        choice: &ecopaste_neo_core::panel_shortcut::PanelShortcut,
+    ) -> String {
+        use ecopaste_neo_core::panel_shortcut::PanelShortcut;
+        match choice {
+            PanelShortcut::Combination { key } => self.combination_label(key),
+            PanelShortcut::DoubleTap { modifier } => format!(
+                "{} {}",
+                self.text("双击", "Double-tap"),
+                self.modifier_label(*modifier)
+            ),
+        }
+    }
     pub fn show(self) -> &'static str {
         self.text("显示历史记录", "Show history")
     }
@@ -23,7 +118,7 @@ impl Locale {
         self.text("设置", "Settings")
     }
     pub fn settings_hint(self) -> &'static str {
-        self.text("更改自动保存，下一次复制即生效。暂停采集不会影响已有历史记录的查询和粘贴。", "Changes save automatically and apply to the next copy. Pausing capture keeps history search and paste available.")
+        self.text("采集规则自动保存，下一次复制即生效；快捷键需点击保存。暂停采集不影响历史查询和粘贴。", "Capture rules save automatically and apply to the next copy; shortcuts require Save. Pausing capture keeps history search and paste available.")
     }
     pub fn capture_enabled(self) -> &'static str {
         self.text("采集剪贴板", "Capture clipboard")
@@ -150,8 +245,8 @@ impl Locale {
     }
     pub fn hint(self) -> &'static str {
         self.text(
-            "⌃⌥⌘V 唤出 · ↑↓ 选择 · Enter 粘贴 · Esc 隐藏",
-            "⌃⌥⌘V Show · ↑↓ Select · Enter Paste · Esc Hide",
+            "↑↓ 选择 · Enter 粘贴 · Esc 隐藏",
+            "↑↓ Select · Enter Paste · Esc Hide",
         )
     }
     pub fn loading(self) -> &'static str {

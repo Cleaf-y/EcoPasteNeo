@@ -25,6 +25,8 @@ objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
 raw-window-handle = "0.6"
 core-graphics = "0.24"
+core-foundation = "0.10"
+foreign-types = "0.5"
 global-hotkey = "0.7"
 tray-icon = "0.21"
 

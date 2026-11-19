@@ -1,8 +1,8 @@
+use super::shortcut::ModifierListener;
 use anyhow::{Context, Result};
-use global_hotkey::{
-    GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
-    hotkey::{Code, HotKey, Modifiers},
-};
+use ecopaste_neo_app::locale::Locale;
+use ecopaste_neo_core::panel_shortcut::PanelShortcut;
+use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use objc2::MainThreadMarker;
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
@@ -18,11 +18,22 @@ pub enum SystemAction {
     Menu(MenuId),
 }
 
+enum Activation {
+    Combination(HotKey),
+    DoubleTap(ModifierListener),
+}
+
 /// Main-thread-owned integration using GPUI's existing AppKit event loop.
 /// Poll next_action from GPUI; no event thread or second run loop is created.
 pub struct SystemIntegration {
     manager: GlobalHotKeyManager,
-    hotkey: HotKey,
+    active: Option<Activation>,
+    candidate: Option<Activation>,
+    editing: bool,
+    pressed: bool,
+    recorded: Option<String>,
+    error: Option<String>,
+    locale: Locale,
     tray: TrayIcon,
     _menu: Menu,
     _application_menu: Menu,
@@ -33,14 +44,10 @@ pub struct SystemIntegration {
 
 impl SystemIntegration {
     /// Create main-thread menu resources, then register the independent shortcut.
-    pub fn new(locale: ecopaste_neo_app::locale::Locale) -> Result<Self> {
+    pub fn new(locale: Locale, saved: Option<&PanelShortcut>) -> Result<Self> {
         MainThreadMarker::new().context("Tray and global hotkey setup requires the main thread")?;
         let manager =
             GlobalHotKeyManager::new().context("Could not initialize the global hotkey manager")?;
-        let hotkey = HotKey::new(
-            Some(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER),
-            Code::KeyV,
-        );
         let show = MenuItem::new(locale.show(), true, None);
         let quit = MenuItem::new(locale.quit(), true, None);
         let settings = MenuItem::new(locale.settings_title(), true, None);
@@ -56,7 +63,7 @@ impl SystemIntegration {
             Menu::with_items(&[&application]).context("Could not build the menu bar")?;
         application_menu.init_for_nsapp();
         let tray = TrayIconBuilder::new()
-            .with_tooltip("EcoPasteNeo — Ctrl+Alt+Cmd+V")
+            .with_tooltip("EcoPasteNeo")
             .with_title("Neo")
             .with_icon(Self::icon()?)
             .with_icon_as_template(true)
@@ -64,20 +71,135 @@ impl SystemIntegration {
             .with_menu_on_left_click(true)
             .build()
             .context("Could not create the macOS menu bar icon")?;
-        // Register last: any earlier setup failure leaves no registered shortcut.
-        manager
-            .register(hotkey)
-            .context("Could not register Ctrl+Alt+Cmd+V; the shortcut may already be in use")?;
-        Ok(Self {
+        let mut integration = Self {
             manager,
-            hotkey,
+            active: None,
+            candidate: None,
+            editing: false,
+            pressed: false,
+            recorded: None,
+            error: None,
+            locale,
             tray,
             _menu: menu,
             _application_menu: application_menu,
             show,
             settings,
             quit,
-        })
+        };
+        if let Some(saved) = saved {
+            match integration.prepare(saved, false) {
+                Ok(()) => integration.finish(true),
+                Err(error) => integration.error = Some(error.to_string()),
+            }
+        } else {
+            integration.error = Some(locale.shortcut_settings_unavailable().into());
+        }
+        integration.refresh_hint();
+        Ok(integration)
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// The UI displays the active registration, independently of the editable draft.
+    pub fn description(&self) -> String {
+        match &self.active {
+            Some(Activation::Combination(key)) => self.locale.combination_label(&key.to_string()),
+            Some(Activation::DoubleTap(listener)) => {
+                self.locale.shortcut_label(&PanelShortcut::DoubleTap {
+                    modifier: listener.modifier,
+                })
+            }
+            None => self.locale.shortcut_inactive().into(),
+        }
+    }
+
+    fn refresh_hint(&mut self) {
+        let description = self.error.as_deref().unwrap_or("");
+        let label = if self.active.is_some() {
+            self.description()
+        } else {
+            format!("{}: {}", self.locale.shortcut_inactive(), description)
+        };
+        self.show
+            .set_text(format!("{} · {label}", self.locale.show()));
+        let _ = self
+            .tray
+            .set_tooltip(Some(format!("EcoPasteNeo — {label}")));
+    }
+
+    /// Suppress delivery without giving up the old registration; drain queued events.
+    pub fn edit(&mut self, editing: bool) {
+        self.editing = editing;
+        self.recorded = None;
+        while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
+            if matches!(&self.active,Some(Activation::Combination(key)) if event.id()==key.id()) {
+                self.pressed = event.state() == HotKeyState::Pressed;
+            }
+        }
+        if let Some(Activation::DoubleTap(listener)) = &self.active {
+            listener.arm(!editing);
+        }
+    }
+
+    /// Carbon consumes the currently registered chord before GPUI's recorder sees it.
+    pub fn take_recorded(&mut self) -> Option<String> {
+        self.recorded.take()
+    }
+
+    /// Reserve the candidate before any settings write; the old activation remains owned.
+    pub fn prepare(&mut self, choice: &PanelShortcut, request: bool) -> Result<()> {
+        if self.candidate.is_some() {
+            anyhow::bail!("{}", self.locale.saving());
+        }
+        self.candidate = match choice {
+            PanelShortcut::Combination { key } => {
+                let key = parse_combination(key, self.locale)?;
+                if matches!(&self.active,Some(Activation::Combination(old)) if old.id()==key.id()) {
+                    None
+                } else {
+                    super::hotkey_probe::check_available(key, self.locale)?;
+                    self.manager
+                        .register(key)
+                        .map_err(|_| anyhow::anyhow!("{}", self.locale.shortcut_conflict()))?;
+                    Some(Activation::Combination(key))
+                }
+            }
+            PanelShortcut::DoubleTap { modifier } => Some(Activation::DoubleTap(
+                ModifierListener::new(*modifier, request, self.locale)?,
+            )),
+        };
+        self.edit(true);
+        Ok(())
+    }
+
+    /// Publish only a successfully persisted candidate; failed writes release only the candidate.
+    pub fn finish(&mut self, saved: bool) {
+        if let Some(candidate) = self.candidate.take() {
+            if saved {
+                self.pressed = false;
+                if let Some(old) = self.active.replace(candidate) {
+                    self.release(old);
+                }
+            } else {
+                self.release(candidate);
+            }
+        }
+        if saved {
+            self.error = None;
+        }
+        self.edit(false);
+        self.refresh_hint();
+    }
+
+    fn release(&self, activation: Activation) {
+        if let Activation::Combination(key) = activation
+            && let Err(error) = self.manager.unregister(key)
+        {
+            eprintln!("Could not unregister panel shortcut: {error}");
+        }
     }
 
     /// Draw a monochrome clipboard template that follows the menu bar appearance.
@@ -101,7 +223,7 @@ impl SystemIntegration {
     }
 
     /// Drain native receivers from the existing GPUI event loop.
-    pub fn next_action(&self) -> Option<SystemAction> {
+    pub fn next_action(&mut self) -> Option<SystemAction> {
         assert!(
             MainThreadMarker::new().is_some(),
             "System events must be polled on the main thread"
@@ -118,8 +240,31 @@ impl SystemIntegration {
             }
             return Some(SystemAction::Menu(event.id));
         }
+        if let Some(Activation::DoubleTap(listener)) = &self.active {
+            if !listener.available() {
+                let old = self.active.take().expect("active listener");
+                self.release(old);
+                self.error = Some(self.locale.shortcut_listener_failed().into());
+                self.refresh_hint();
+            } else if listener.take() && !self.editing {
+                return Some(SystemAction::Toggle);
+            }
+        }
         while let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-            if event.id() == self.hotkey.id() && event.state() == HotKeyState::Pressed {
+            if !matches!(&self.active,Some(Activation::Combination(key)) if event.id()==key.id()) {
+                continue;
+            }
+            let pressed = event.state() == HotKeyState::Pressed;
+            let repeated = self.pressed;
+            self.pressed = pressed;
+            if pressed
+                && !repeated
+                && self.editing
+                && let Some(Activation::Combination(key)) = &self.active
+            {
+                self.recorded = Some(key.to_string());
+            }
+            if pressed && !repeated && !self.editing {
                 return Some(SystemAction::Toggle);
             }
         }
@@ -141,9 +286,22 @@ impl SystemIntegration {
 
 impl Drop for SystemIntegration {
     fn drop(&mut self) {
-        if let Err(error) = self.manager.unregister(self.hotkey) {
-            eprintln!("Could not unregister Ctrl+Alt+Cmd+V: {error}");
+        if let Some(candidate) = self.candidate.take() {
+            self.release(candidate);
         }
-        // Tray/menu handles are then dropped, removing the status item.
+        if let Some(active) = self.active.take() {
+            self.release(active);
+        }
     }
+}
+
+/// Validate the same representation used by the recorder and persisted configuration.
+pub fn parse_combination(key: &str, locale: Locale) -> Result<HotKey> {
+    let key: HotKey = key
+        .parse()
+        .map_err(|_| anyhow::anyhow!("{}", locale.shortcut_invalid()))?;
+    if key.mods.is_empty() || super::hotkey_probe::scan_code(&key.key.to_string()).is_none() {
+        anyhow::bail!("{}", locale.shortcut_invalid());
+    }
+    Ok(key)
 }

@@ -390,3 +390,58 @@ fn sensitive_changes_preserve_independent_rules_and_failed_saves() {
         serde_json::from_slice(&fs::read(paths.settings_path()).unwrap()).unwrap();
     assert_eq!(document["sensitive"]["futureRule"], 7);
 }
+
+#[test]
+fn panel_shortcut_defaults_persists_independently_and_failed_write_keeps_previous() {
+    use ecopaste_neo_core::panel_shortcut::{PanelShortcut, TapModifier};
+    let parent = tempfile::tempdir().unwrap();
+    let paths = Storage::new(parent.path(), Environment::Dev)
+        .unwrap()
+        .open()
+        .unwrap();
+    let original = json!({"captureEnabled": false,"capture":{"image":false},"sensitive":{"redactSecrets":false},"filters":{"excludedAppIds":[]},"futureSetting":{"keep":42}});
+    fs::write(
+        paths.settings_path(),
+        serde_json::to_vec(&original).unwrap(),
+    )
+    .unwrap();
+    let store = SettingsStore::open(&paths);
+    assert_eq!(
+        store.snapshot().unwrap().panel_shortcut,
+        PanelShortcut::default()
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(paths.settings_path()).unwrap()).unwrap(),
+        original
+    );
+    let combination = PanelShortcut::Combination {
+        key: "control+alt+super+KeyB".into(),
+    };
+    for choice in [
+        combination,
+        PanelShortcut::DoubleTap {
+            modifier: TapModifier::Control,
+        },
+        PanelShortcut::default(),
+    ] {
+        let saved = store
+            .update(SettingsChange::PanelShortcut(choice.clone()))
+            .unwrap();
+        assert_eq!(saved.panel_shortcut, choice);
+        assert_eq!(SettingsStore::open(&paths).snapshot().unwrap(), saved);
+        let mut document: Value =
+            serde_json::from_slice(&fs::read(paths.settings_path()).unwrap()).unwrap();
+        document.as_object_mut().unwrap().remove("panelShortcut");
+        assert_eq!(document, original);
+    }
+    let saved = store.snapshot().unwrap();
+    fs::remove_file(paths.settings_path()).unwrap();
+    fs::create_dir(paths.settings_path()).unwrap();
+    assert!(store
+        .update(SettingsChange::PanelShortcut(PanelShortcut::DoubleTap {
+            modifier: TapModifier::Option
+        }))
+        .is_err());
+    assert_eq!(store.snapshot().unwrap(), saved);
+    assert!(paths.settings_path().is_dir());
+}

@@ -11,12 +11,14 @@ use crate::{
         settings::{Capture, CaptureKind, Filters, Sensitive},
         CaptureSettings,
     },
+    panel_shortcut::PanelShortcut,
     paths::DataPaths,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    pub panel_shortcut: PanelShortcut,
     pub capture_enabled: bool,
     pub capture: Capture,
     pub sensitive: Sensitive,
@@ -26,6 +28,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            panel_shortcut: PanelShortcut::default(),
             capture_enabled: true,
             capture: Capture::default(),
             sensitive: Sensitive::default(),
@@ -37,6 +40,7 @@ impl Default for Settings {
 /// A window sends only its edited field, never an old complete snapshot.
 #[derive(Debug, Clone)]
 pub enum SettingsChange {
+    PanelShortcut(PanelShortcut),
     CaptureEnabled(bool),
     CollectSecrets(bool),
     RedactSecrets(bool),
@@ -130,6 +134,9 @@ impl SettingsStore {
             .map_err(|error| SettingsError::Unavailable(error.clone()))?;
         let mut document = loaded.document.clone();
         match change {
+            SettingsChange::PanelShortcut(value) => {
+                document["panelShortcut"] = serde_json::to_value(value)?;
+            }
             SettingsChange::CaptureEnabled(value) => document["captureEnabled"] = value.into(),
             SettingsChange::CaptureType(kind, value) => {
                 let key = match kind {

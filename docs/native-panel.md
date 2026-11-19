@@ -12,7 +12,7 @@ cargo run -p ecopaste-neo-app --bin EcoPasteNeo -- --show
 
 打包脚本支持标准 `CARGO_TARGET_DIR` 环境变量，默认使用仓库 `target/`。本地脚本输出 `dist/EcoPasteNeo.app`，使用临时签名，采用 core 中的正式产品名和应用标识。该脚本构建 debug 版本，默认使用 `dev` 数据目录，不是发布或更新流程。
 
-点击菜单栏的 **Neo** 可显示历史或退出。全局快捷键为 **⌃⌥⌘V**，与独立原型的 **⌃⌥⌘P** 不同。注册被占用的快捷键会报错并退出，不自动换键。面板显示时将焦点放在搜索框；输入法组字期间，方向键和 Esc 交给输入法，组字结束后 ↑↓ 选择记录、Esc 隐藏。非固定时点击其他应用会隐藏面板。Enter 或点击记录粘贴；Shift+Enter 和“纯文本粘贴”按既有规则去掉富文本格式，文件记录转为换行分隔的路径。面板中的“固定窗口”仅作用于当前会话。
+点击菜单栏的 **Neo** 可显示历史或退出。首次全局快捷键为 **⌃⌥⌘V**，可在设置中改为其他组合或双击修饰键。注册或监听失败时保留菜单入口、显示原因，不退出或自动换键。面板显示时将焦点放在搜索框；输入法组字期间，方向键和 Esc 交给输入法，组字结束后 ↑↓ 选择记录、Esc 隐藏。非固定时点击其他应用会隐藏面板。Enter 或点击记录粘贴；Shift+Enter 和“纯文本粘贴”按既有规则去掉富文本格式，文件记录转为换行分隔的路径。面板中的“固定窗口”仅作用于当前会话。
 
 可选启动参数：
 
@@ -25,6 +25,25 @@ cargo run -p ecopaste-neo-app --bin EcoPasteNeo -- --show
 | `--locale zh-CN` / `en-US` | 界面语言，默认简体中文 |
 
 macOS 默认数据父目录是 `~/Library/Application Support`。`ECOPASTENEO_DATA_PARENT` 提供与 `--data-parent` 相同的启动默认值，显式参数优先；`ECOPASTENEO_SHOW=1` 等同于默认启用 `--show`，用于由 Launch Services 启动的测试包。
+
+## 全局面板快捷键
+
+设置中的快捷键单独点击“保存”生效，采集规则仍自动保存。组合键可按键录入，也可输入 `Control+Alt+Super+KeyV` 形式的名称；双击模式直接选择 Control、Option、Shift 或 Command，不要求在录入框演示双击。“取消”或关窗会丢弃未保存草稿。“恢复默认组合”只填写默认组合，仍须保存。界面明确区分草稿与实际生效方式，托盘和应用菜单使用相同文案。
+
+`panelShortcut` 保存带 `mode` 的组合键或双击配置。旧文件缺少此字段时使用默认组合，不在启动时重写已有文件。新组合先经过 Carbon 独占探测，再交给 `GlobalHotKeyManager` 注册；默认的非独占注册会允许多个应用共享组合，仅凭其成功返回不能识别独占占用。独占探测与 manager 注册在同一主线程连续完成，不运行中间事件循环；其他进程仍可能在之后注册或改变其快捷键，不能据此承诺永久独占。
+
+新注册或只读监听先作为候选保留，原方式继续由控制器持有。原子保存成功才接管并释放旧资源；保存失败释放候选并恢复旧方式和设置。录入和写入期间只暂停派发，不提前释放旧注册；结束时清空旧队列及双击进度。组合键按下到松开最多切换一次。关闭设置不会取消已在执行的写入。
+
+双击使用 Session 级 `CGEventTap` 的 [`ListenOnly`](https://developer.apple.com/documentation/coregraphics/cgeventtapoptions)，在现有主 run loop 观察修饰键及普通按键的按下、松开，不吞键、不模拟按键、不保存输入内容。每次轻按及首按下到第二次松开的总时间均以系统 [`NSEvent.doubleClickInterval`](https://developer.apple.com/documentation/appkit/nsevent/doubleclickinterval) 为上限，第二次松开才派发；长按、其他按键和修饰键组合取消当前进度，成功后两次轻按不能复用。切回组合键或退出即移除监听源并使 Mach port 失效。
+
+组合键模式不申请输入监控权限。选择双击模式会先说明用途，点击保存才允许请求授权；未授权时保留原设置。冷启动只检查权限，不弹出授权请求。已保存组合被独占，或双击权限撤销/监听不可用时，保留托盘与应用菜单的显示、设置、退出入口，并自动打开设置解释原因。普通输入及面板内 Enter、Esc、输入法处理保持原样。
+
+显式的 macOS 占用夹具用于隔离验收，不读取剪贴板或发送键盘事件：
+
+```bash
+cargo run -p ecopaste-neo-app --example occupy_shortcut --locked -- Control+Alt+Super+KeyM
+# 程序保持独占，按 Enter 释放退出；另一个进程可用 --probe 检查占用。
+```
 
 ## 隔离的 1000 条测试记录
 

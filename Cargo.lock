@@ -1374,8 +1374,10 @@ name = "ecopaste-neo-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "core-foundation 0.10.1",
  "core-graphics 0.24.0",
  "ecopaste-neo-core",
+ "foreign-types",
  "global-hotkey",
  "gpui-component",
  "gpui-pre",

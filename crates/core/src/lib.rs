@@ -4,6 +4,7 @@ pub mod content;
 #[cfg(feature = "sqlx")]
 pub mod db;
 pub mod identity;
+pub mod panel_shortcut;
 pub mod paths;
 #[cfg(feature = "preview")]
 pub mod preview;

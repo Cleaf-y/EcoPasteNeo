@@ -1,3 +1,4 @@
+pub mod double_tap;
 pub mod drag;
 pub mod history;
 pub mod locale;

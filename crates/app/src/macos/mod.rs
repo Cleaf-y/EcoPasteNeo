@@ -1,13 +1,15 @@
 mod drag_out;
 mod history_menu;
+mod hotkey_probe;
 mod native;
 mod panel;
 mod paste;
 mod preferences;
 mod record_preview;
+mod shortcut;
 mod system;
 
-use std::time::Duration;
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use ecopaste_neo_app::{history::HistorySource, options::Options};
@@ -26,7 +28,15 @@ pub fn run() -> Result<()> {
     );
     gpui_platform::application().run(move |cx: &mut App| {
         gpui_component::init(cx);
-        let integration = match SystemIntegration::new(options.locale) {
+        let integration = match SystemIntegration::new(
+            options.locale,
+            source
+                .settings()
+                .snapshot()
+                .ok()
+                .as_ref()
+                .map(|settings| &settings.panel_shortcut),
+        ) {
             Ok(integration) => integration,
             Err(error) => {
                 eprintln!("EcoPasteNeo system integration: {error:#}");
@@ -34,9 +44,16 @@ pub fn run() -> Result<()> {
                 return;
             }
         };
+        let integration = Rc::new(RefCell::new(integration));
         let bounds = Bounds::centered(None, size(px(620.0), px(700.0)), cx);
-        let mut settings = preferences::SettingsWindow::new(source.clone(), options.locale, cx);
-        let settings_unavailable = source.settings().snapshot().is_err();
+        let mut settings = preferences::SettingsWindow::new(
+            source.clone(),
+            options.locale,
+            integration.clone(),
+            cx,
+        );
+        let settings_unavailable =
+            source.settings().snapshot().is_err() || integration.borrow().error().is_some();
         let mut panel = None;
         let handle = cx
             .open_window(
@@ -80,6 +97,7 @@ pub fn run() -> Result<()> {
         cx.spawn(async move |cx| {
             loop {
                 executor.timer(Duration::from_millis(25)).await;
+                cx.update(|cx| settings.poll_shortcut(cx));
                 let _ = handle.update(cx, |_, window, cx| {
                     panel.update(cx, |view, cx| {
                         view.poll_capture(cx);
@@ -87,7 +105,11 @@ pub fn run() -> Result<()> {
                         view.poll_drag(cx);
                     });
                 });
-                while let Some(action) = integration.next_action() {
+                loop {
+                    let action = integration.borrow_mut().next_action();
+                    let Some(action) = action else {
+                        break;
+                    };
                     if matches!(action, SystemAction::Quit) {
                         cx.update(|cx| cx.quit());
                         return;
