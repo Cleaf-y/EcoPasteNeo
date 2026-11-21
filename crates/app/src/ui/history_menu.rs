@@ -1,6 +1,6 @@
 use ecopaste_neo_app::locale::Locale;
 use ecopaste_neo_core::db::models::ClipboardItem;
-use tray_icon::menu::{ContextMenu, Menu, MenuId, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{Menu, MenuId, MenuItem, PredefinedMenuItem};
 
 #[derive(Clone, Copy)]
 pub enum MenuAction {
@@ -100,8 +100,6 @@ impl HistoryMenu {
     /// Revoke queued events before cancelling tracking, retaining the native menu until replacement.
     pub fn cancel(&mut self) {
         self.handled = true;
-        // SAFETY: muda owns this live NSMenu; every caller runs on the main thread.
-        let menu = unsafe { &*self.menu.ns_menu().cast::<objc2_app_kit::NSMenu>() };
-        menu.cancelTracking();
+        crate::platform::cancel_menu(&self.menu);
     }
 }

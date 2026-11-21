@@ -1,5 +1,5 @@
 use super::*;
-use crate::macos::history_menu::{HistoryMenu, MenuAction, MenuSelection};
+use crate::ui::history_menu::{HistoryMenu, MenuAction, MenuSelection};
 use ecopaste_neo_app::history::RecordAction;
 use gpui::{MouseDownEvent, Point};
 use tray_icon::menu::MenuId;
@@ -95,7 +95,7 @@ impl HistoryPanel {
     }
 
     /// One receiver routes tray and context events; menu item handles identify their saved ID.
-    pub(in crate::macos) fn handle_menu_event(
+    pub(in crate::ui) fn handle_menu_event(
         &mut self,
         id: &MenuId,
         _: &mut Window,
@@ -116,17 +116,13 @@ impl HistoryPanel {
     }
 
     /// Wait until tracking has ended before opening an editor or starting a mutation.
-    pub(in crate::macos) fn poll_management(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::ui) fn poll_management(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.management.menu_open || !self.visible {
             return;
         }
         if std::mem::take(&mut self.management.restore_focus) {
-            if native::frontmost_pid() == self.target {
-                self.panel.restore_key();
+            if self.target.is_some_and(|target| target.is_available()) {
+                self.panel.reclaim();
                 self.input.update(cx, |input, cx| input.focus(window, cx));
             } else {
                 self.check_panel_focus(cx);
@@ -153,7 +149,7 @@ impl HistoryPanel {
                     label: selection.label,
                     note: Some(note),
                 });
-                self.panel.restore_key();
+                self.panel.reclaim();
             }
             MenuAction::Delete => {
                 self.close_preview(false, cx);
@@ -162,7 +158,7 @@ impl HistoryPanel {
                     label: selection.label,
                     note: None,
                 });
-                self.panel.restore_key();
+                self.panel.reclaim();
             }
         }
         cx.notify();

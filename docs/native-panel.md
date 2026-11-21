@@ -1,6 +1,12 @@
-# macOS 原生历史面板
+# 原生历史面板（macOS / Windows）
 
-`crates/app` 是独立的 GPUI 应用入口，生成 `EcoPasteNeo`。现有 Tauri 应用仍通过 `src-tauri/Cargo.toml` 构建。当前原生面板提供 SQLite 历史列表、搜索、分页、后台剪贴板捕获、记录预览、右键管理和所选记录写回。macOS 的运行与验证步骤见下文。Windows 原生面板暂缓，旧 Windows 实现保留。
+`crates/app` 是独立的 GPUI 应用入口，生成 `EcoPasteNeo`。现有 Tauri 应用仍通过 `src-tauri/Cargo.toml` 构建。当前原生面板提供 SQLite 历史列表、搜索、分页、后台剪贴板捕获、记录预览、右键管理和所选记录写回。macOS 的运行与验证步骤见下文；Windows 目前是用于验证可行性的最小版本，见[文末](#windows-验证版)。
+
+## 代码结构
+
+`crates/app/src/ui/` 是两个平台共用的 GPUI 界面：历史面板、预览、右键管理、设置窗口、托盘与全局快捷键。`crates/app/src/platform/` 是唯一调用系统接口的地方，`platform/mod.rs` 列出统一的对外名称，`platform/macos/` 和 `platform/windows/` 各自实现。`ui/` 只通过 `crate::platform::` 使用系统功能，不直接引用 `objc2`、`windows` 等平台库，也不写 `cfg(target_os)`。需要按平台区分的文案放在 `locale.rs` 的 `platform_text`。
+
+粘贴流程在 `ui/panel.rs` 只写一份：唤出时 `PasteTarget::capture()` 记下目标，粘贴前用 `is_available()` 检查，写入剪贴板后 `NativePanel::yield_to()` 交还键盘焦点，发送按键前再用 `is_foreground()` 确认目标在前台，固定模式下最后 `reclaim()` 取回焦点。macOS 面板是不激活的 NSPanel，目标应用始终在前台；Windows 面板是正常获得焦点的窗口，粘贴前把前台交还给目标窗口。
 
 ## 构建与运行
 
@@ -186,3 +192,34 @@ fixture_parent="$(mktemp -d /private/tmp/ecopaste-settings10.XXXXXX)"
 ```
 
 先检查托盘重复打开、关闭重开和键盘操作；再以不同专用标记测试“采集 A → 暂停复制 B → 恢复复制 C”，核对 A/C 存在、B 不存在且不补录。关闭图片采集、保留纯文本，用专用图片和文字核对类型；总开关关闭后退出重开，确认总开关及图片选择保留。仅在该临时环境测试目录不可写和损坏 JSON，测试后恢复文件与权限。自动测试构造载荷，不操作系统剪贴板。
+
+## Windows 验证版
+
+Windows 版与 macOS 共用 `ui/` 下的全部界面和粘贴流程，系统调用在 `platform/windows/`。这一版用来实测 GPUI 在 Windows 上是否满足剪贴板面板的要求，结论决定后续 Windows 实现的做法。
+
+**构建。** 需要 rustup（会按 `rust-toolchain.toml` 安装 1.96）和 Visual Studio Build Tools 的“使用 C++ 的桌面开发”。debug 版在运行时编译 GPUI 着色器，不需要 Windows SDK 的 `fxc.exe`；release 版构建时需要。debug 版保留控制台窗口，便于看日志。也可以直接下载 GitHub Actions 中 “Neo Check” 工作流产出的 `EcoPasteNeo-windows-debug`。
+
+```powershell
+cargo build -p ecopaste-neo-app --bin EcoPasteNeo --locked
+# 用独立目录生成 1000 条测试记录，再启动并立即显示面板
+$fixture = "$env:TEMP\ecopaste-win-check"
+New-Item -ItemType Directory -Force $fixture | Out-Null
+cargo run -p ecopaste-neo-app --example seed_history --locked -- --data-parent $fixture --environment dev
+.\target\debug\EcoPasteNeo.exe --show --data-parent $fixture --environment dev
+```
+
+默认数据父目录是 `%LOCALAPPDATA%`。加 `--no-capture` 可在测试期间不记录本机剪贴板。目前没有单实例保护，不要同时运行两份。
+
+**当前行为。** 托盘图标左键显示面板，右键打开“显示历史记录 / 设置 / 退出”菜单。默认全局快捷键是 **Alt+C**，可在设置中修改。面板是普通的可获得焦点窗口：唤出时记下当前前台窗口，然后自己获得焦点，可以直接打字搜索；点到面板外会隐藏。Enter 或单击记录时，先把前台交还给记下的窗口，再发送 Ctrl+V；Shift+Enter 为纯文本粘贴。Ctrl+P 打开预览，右键卡片打开管理菜单。文件和图片记录可以拖到资源管理器，只复制、不移动，暂无拖动预览图。双击修饰键和登录时启动尚未实现：设置中双击按钮不可用，登录启动显示为不可用。
+
+**验证清单。** 每项记录 Windows 版本、显示缩放比例、显示器数量、输入法和实际结果。
+
+| 编号 | 操作 | 期望结果 |
+|---|---|---|
+| W01 | 在记事本中留下光标，分别用 Alt+C 和托盘左键唤出；直接打字搜索，↑↓ 选择，Esc 隐藏 | 面板在鼠标所在屏幕居中并获得焦点；隐藏后记事本光标仍在原处，可以继续输入 |
+| W02 | 在搜索框用微软拼音输入中文，组字期间按 ↑↓、Esc、Enter | 候选框显示在面板上方；组字期间按键交给输入法，组字结束后 Enter 才粘贴 |
+| W03 | 非固定模式下，用 Enter 和鼠标单击各粘贴一次到记事本、浏览器地址栏、网页输入框、VS Code、Office 或 WPS；再开启“固定窗口”连续粘贴两条 | 内容完整进入原光标处；记下目标应用失去焦点时的副作用（下拉框关闭、自动补全消失等）；固定模式面板不隐藏，第二次无需重新选目标 |
+| W04 | 快捷键和托盘反复唤出、隐藏 20 次；在设置中修改快捷键并保存；从托盘退出后重新启动 | 每次都能唤出并获得焦点；新快捷键立即生效；重启后只有一个托盘图标，快捷键正常注册 |
+| W05 | 把文件记录和图片记录拖到资源管理器空白处；再拖一次并在途中按 Esc | 资源管理器收到文件且能打开；取消时不产生文件、程序不崩溃（zed#42227）；之后单击粘贴和右键菜单仍正常 |
+
+点击托盘图标时，Windows 会先把前台切到任务栏，这时记下的粘贴目标是任务栏而不是之前的应用，所以 W03 的粘贴请用全局快捷键唤出。目标窗口以管理员身份运行时，Windows 会静默拦截普通权限程序发出的按键，此时粘贴不生效属于预期。

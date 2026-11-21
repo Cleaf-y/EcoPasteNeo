@@ -16,11 +16,8 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
 };
 
-use super::{
-    native::{self, Panel},
-    paste,
-    record_preview::PreviewWindow,
-};
+use super::record_preview::PreviewWindow;
+use crate::platform::{self, NativePanel, PasteTarget};
 use ecopaste_neo_core::writeback::WritebackGuard;
 
 #[path = "record_management.rs"]
@@ -32,7 +29,7 @@ use file_drag::FileDrag;
 
 pub struct HistoryPanel {
     input: Entity<InputState>,
-    panel: Panel,
+    panel: NativePanel,
     source: HistorySource,
     state: HistoryState,
     list: ListState,
@@ -45,7 +42,7 @@ pub struct HistoryPanel {
     pasting: bool,
     paste_task: Option<Task<()>>,
     action_error: Option<String>,
-    target: Option<i32>,
+    target: Option<PasteTarget>,
     interaction: u64,
     refresh_pending: bool,
     preview: Option<PreviewWindow>,
@@ -62,7 +59,7 @@ impl HistoryPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let panel = Panel::from_window(window).expect("GPUI must expose an AppKit window");
+        let panel = NativePanel::from_window(window).expect("GPUI must expose a native window");
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(locale.search()));
         input.update(cx, |input, cx| input.focus(window, cx));
         cx.subscribe_in(&input, window, |this, input, event, _, cx| {
@@ -145,7 +142,7 @@ impl HistoryPanel {
             return;
         }
         self.interaction += 1;
-        self.target = native::frontmost_pid();
+        self.target = PasteTarget::capture();
         self.visible = true;
         if self.refresh_pending {
             self.refresh(cx);
@@ -203,15 +200,12 @@ impl HistoryPanel {
         let Some(row) = self.state.rows.get(self.state.selected) else {
             return;
         };
-        if let Err(error) = paste::check_permission(self.locale) {
+        if let Err(error) = platform::check_paste_permission(self.locale) {
             self.action_error = Some(error.to_string());
             cx.notify();
             return;
         }
-        let Some(target) = self
-            .target
-            .filter(|pid| Some(*pid) == native::frontmost_pid())
-        else {
+        let Some(target) = self.target.filter(PasteTarget::is_available) else {
             self.action_error = Some(self.locale.target_missing().into());
             cx.notify();
             return;
@@ -229,17 +223,12 @@ impl HistoryPanel {
                 if !this.visible || session != this.interaction {
                     return Ok(false);
                 }
-                paste::check_permission(this.locale)?;
-                anyhow::ensure!(
-                    native::frontmost_pid() == Some(target),
-                    "{}",
-                    this.locale.target_missing()
-                );
+                platform::check_paste_permission(this.locale)?;
+                anyhow::ensure!(target.is_available(), "{}", this.locale.target_missing());
                 let write = prepared??;
                 write.write(&this.guard)?;
-                if this.pinned {
-                    this.panel.resign_key();
-                } else {
+                this.panel.yield_to(&target, this.pinned);
+                if !this.pinned {
                     this.hide(cx);
                 }
                 Ok(true)
@@ -254,13 +243,9 @@ impl HistoryPanel {
                             "{}",
                             this.locale.target_missing()
                         );
-                        anyhow::ensure!(
-                            native::frontmost_pid() == Some(target),
-                            "{}",
-                            this.locale.target_missing()
-                        );
-                        paste::check_permission(this.locale)?;
-                        paste::simulate_paste()
+                        anyhow::ensure!(target.is_foreground(), "{}", this.locale.target_missing());
+                        platform::check_paste_permission(this.locale)?;
+                        platform::send_paste_keys()
                     })
                     .unwrap_or_else(Err)
                 }
@@ -270,8 +255,8 @@ impl HistoryPanel {
             };
             executor.timer(Duration::from_millis(70)).await;
             let _ = this.update(cx, |this, cx| {
-                if this.pinned && this.visible && native::frontmost_pid() == Some(target) {
-                    this.panel.restore_key();
+                if this.pinned && this.visible && target.is_foreground() {
+                    this.panel.reclaim();
                 }
                 this.pasting = false;
                 if let Err(error) = result {
@@ -307,7 +292,7 @@ impl HistoryPanel {
             preview.close(cx);
         }
         if restore_focus && self.visible {
-            self.panel.restore_key();
+            self.panel.reclaim();
         }
         cx.notify();
     }
@@ -468,11 +453,11 @@ impl HistoryPanel {
                 }
                 cx.stop_propagation();
             }
-            "p" if event.keystroke.modifiers.platform => {
+            "p" if event.keystroke.modifiers.secondary(cx) => {
                 self.toggle_preview(cx);
                 cx.stop_propagation();
             }
-            "q" if event.keystroke.modifiers.platform => {
+            "q" if event.keystroke.modifiers.secondary(cx) => {
                 cx.quit();
                 cx.stop_propagation();
             }

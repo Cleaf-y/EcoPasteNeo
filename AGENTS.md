@@ -70,9 +70,16 @@ src-tauri/
     autostart/  # 开机自启
     settings/   # 设置模型与持久化
     core/       # 错误类型、路径、prevent_default（setup 在 lib.rs）
+crates/
+  core/         # 平台无关业务：数据库、采集、设置、路径（新旧应用共用）
+  app/src/
+    ui/         # GPUI 界面，macOS/Windows 共用；只经 crate::platform 调系统接口，不写 cfg(target_os)
+    platform/   # 系统接口：mod.rs 定义统一名称，macos/、windows/ 各自实现
 migrations/     # core 与旧 Tauri 共用的唯一迁移来源
 src/            # 前端 components/pages/stores/hooks/locales/utils
 ```
+
+GPUI 应用的结构、运行与验证见 [docs/native-panel.md](./docs/native-panel.md)。
 
 ## 常用命令
 

@@ -1,0 +1,70 @@
+name: Neo Check
+
+"on":
+  pull_request:
+    paths:
+      - crates/**
+      - migrations/**
+      - vendor/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/neo-check.yml
+  push:
+    branches:
+      - feat/**
+    paths:
+      - crates/**
+      - migrations/**
+      - vendor/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/neo-check.yml
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Neo (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Rustfmt
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy -p ecopaste-neo-app -p ecopaste-neo-core --all-targets --all-features --locked -- -D warnings
+
+      - name: Test core
+        run: cargo test -p ecopaste-neo-core --all-features --locked
+
+      - name: Test app
+        run: cargo test -p ecopaste-neo-app --locked
+
+      # Debug builds compile GPUI shaders at runtime, so no Windows SDK shader compiler is needed.
+      - name: Build Windows debug executable
+        if: runner.os == 'Windows'
+        run: cargo build -p ecopaste-neo-app --bin EcoPasteNeo --locked
+
+      - name: Upload Windows debug executable
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: EcoPasteNeo-windows-debug
+          path: target/debug/EcoPasteNeo.exe

@@ -1,4 +1,4 @@
-//! System-owned login state. Never mirror this state into the settings file.
+//! `SMAppService.mainAppService` login item for the packaged app.
 use anyhow::{Result, bail};
 use ecopaste_neo_app::locale::Locale;
 use ecopaste_neo_core::identity::{APPLICATION_ID, PRODUCT_NAME};
@@ -7,36 +7,11 @@ use objc2_foundation::{NSAppleEventDescriptor, NSAppleEventManager, NSBundle, NS
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 use std::path::Path;
 
+use crate::platform::LoginStatus;
+
 const OPEN_APPLICATION: u32 = u32::from_be_bytes(*b"oapp");
 const PROPERTY_DATA: u32 = u32::from_be_bytes(*b"prdt");
 const LOGIN_ITEM: u32 = u32::from_be_bytes(*b"lgit");
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LoginStatus {
-    NotRegistered,
-    Enabled,
-    RequiresApproval,
-    NotFound,
-    Unsupported,
-    Unpackaged,
-}
-
-impl LoginStatus {
-    pub fn label(self, locale: Locale) -> &'static str {
-        match self {
-            Self::NotRegistered => locale.login_disabled(),
-            Self::Enabled => locale.login_enabled(),
-            Self::RequiresApproval => locale.login_approval(),
-            Self::NotFound => locale.login_not_found(),
-            Self::Unsupported => locale.login_unsupported(),
-            Self::Unpackaged => locale.login_packaged_app(),
-        }
-    }
-
-    pub fn can_change(self) -> bool {
-        !matches!(self, Self::Unsupported | Self::Unpackaged)
-    }
-}
 
 /// Read during GPUI's applicationDidFinishLaunching callback, while the launch event is current.
 pub fn launched_at_login() -> bool {

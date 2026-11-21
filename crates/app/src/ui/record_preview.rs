@@ -12,13 +12,14 @@ use gpui::{
 };
 use gpui_component::{ActiveTheme, Root};
 
-use super::{native::Panel, panel::HistoryPanel};
+use super::panel::HistoryPanel;
+use crate::platform::NativePanel;
 
 /// One reusable child window. Closing clears its data and invalidates every request.
 pub struct PreviewWindow {
     _window: WindowHandle<Root>,
     view: Entity<RecordPreview>,
-    panel: Panel,
+    panel: NativePanel,
 }
 
 impl PreviewWindow {
@@ -27,7 +28,7 @@ impl PreviewWindow {
         source: HistorySource,
         locale: Locale,
         owner: WeakEntity<HistoryPanel>,
-        parent: &Panel,
+        parent: &NativePanel,
         cx: &mut App,
     ) -> anyhow::Result<Self> {
         let mut content = None;
@@ -85,7 +86,7 @@ impl PreviewWindow {
     }
 
     /// Updating a record never updates the history panel's captured paste target.
-    pub fn show(&self, id: String, parent: &Panel, cx: &mut App) {
+    pub fn show(&self, id: String, parent: &NativePanel, cx: &mut App) {
         self.view.update(cx, |view, cx| view.load(id, cx));
         self.panel.show_preview(parent);
     }
@@ -107,7 +108,7 @@ struct RecordPreview {
     owner: WeakEntity<HistoryPanel>,
     source: HistorySource,
     locale: Locale,
-    panel: Panel,
+    panel: NativePanel,
     focus: FocusHandle,
     state: PreviewState,
     rows: Vec<String>,
@@ -139,7 +140,7 @@ impl RecordPreview {
             owner,
             source,
             locale,
-            panel: Panel::from_window(window).expect("Preview must expose AppKit window"),
+            panel: NativePanel::from_window(window).expect("Preview must expose a native window"),
             focus,
             state: PreviewState::default(),
             rows: vec![],
@@ -208,11 +209,11 @@ impl RecordPreview {
                 self.close(cx);
                 cx.stop_propagation();
             }
-            "q" if event.keystroke.modifiers.platform => {
+            "q" if event.keystroke.modifiers.secondary(cx) => {
                 cx.quit();
                 cx.stop_propagation();
             }
-            "p" | "w" if event.keystroke.modifiers.platform => {
+            "p" | "w" if event.keystroke.modifiers.secondary(cx) => {
                 self.close(cx);
                 cx.stop_propagation();
             }

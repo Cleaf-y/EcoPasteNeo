@@ -1,17 +1,12 @@
-#[cfg(target_os = "macos")]
-mod macos;
+// Release builds run without a console window; debug builds keep stderr visible.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+mod platform;
+mod ui;
 
 fn main() {
-    #[cfg(target_os = "macos")]
-    if let Err(error) = macos::run() {
+    if let Err(error) = ui::run() {
         eprintln!("EcoPasteNeo: {error:#}");
-        std::process::exit(1);
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        // TODO: Validate the GPUI Windows panel before enabling this entry point.
-        eprintln!("The EcoPasteNeo GPUI panel currently supports macOS only.");
         std::process::exit(1);
     }
 }

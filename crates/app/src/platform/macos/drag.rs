@@ -12,7 +12,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSMutableArray, NSPoint, NSRect, NSSize, NSString, NSURL};
 
-use super::native::Panel;
+use super::panel::NativePanel;
 
 struct SourceIvars {
     ended: mpsc::Sender<()>,
@@ -72,7 +72,7 @@ pub struct NativeDrag {
 impl NativeDrag {
     /// Start outside a GPUI update; AppKit may dispatch nested mouse/key events here.
     /// Only file URL writers are used. The general system pasteboard is untouched.
-    pub fn start(panel: &Panel, paths: &[PathBuf], event: &PressEvent) -> Result<Self> {
+    pub fn start(panel: &NativePanel, paths: &[PathBuf], event: &PressEvent) -> Result<Self> {
         let mtm =
             MainThreadMarker::new().context("Native file dragging requires the main thread")?;
         ensure!(

@@ -11,12 +11,12 @@ use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 /// Copies do not retain the NSWindow and must not outlive it. The Rc marker prevents
 /// sending this identity to another thread. No style, behavior, or level is changed.
 #[derive(Clone, Copy)]
-pub struct Panel {
+pub struct NativePanel {
     window: NonNull<NSWindow>,
     _main_thread_only: PhantomData<Rc<()>>,
 }
 
-impl Panel {
+impl NativePanel {
     /// Borrow the live NSWindow owned by this GPUI window on the main thread.
     pub fn from_window(window: &gpui::Window) -> Result<Self> {
         MainThreadMarker::new().context("Native panel creation requires the main thread")?;
@@ -24,9 +24,7 @@ impl Panel {
         let handle = HasWindowHandle::window_handle(window)
             .map_err(|error| anyhow!("GPUI did not provide a native window handle: {error}"))?;
         let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
-            bail!(
-                "Expected an AppKit window handle; EcoPasteNeo GPUI currently supports only macOS"
-            );
+            bail!("Expected an AppKit window handle");
         };
         // The raw-window-handle contract supplies a live NSView owned by GPUI.
         let view = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
@@ -78,7 +76,7 @@ impl Panel {
     }
 
     /// Show a child PopUp beside the history panel without activating or recapturing a target.
-    pub fn show_preview(&self, parent: &Panel) {
+    pub fn show_preview(&self, parent: &NativePanel) {
         let window = self.native();
         // SAFETY: This helper is used only for GPUI WindowKind::PopUp, an NSPanel subclass.
         unsafe {
@@ -161,12 +159,16 @@ impl Panel {
         }
     }
 
-    /// Give keys back to the still-active target without activating any application.
-    pub fn resign_key(&self) {
-        self.native().resignKeyWindow();
+    /// Before pasting, give keys back to the target. A nonactivating panel never took the
+    /// frontmost application, so only a panel that stays visible must resign key status.
+    pub fn yield_to(&self, _target: &PasteTarget, staying_visible: bool) {
+        if staying_visible {
+            self.native().resignKeyWindow();
+        }
     }
 
-    pub fn restore_key(&self) {
+    /// Take keys back after a pinned paste without activating the application.
+    pub fn reclaim(&self) {
         self.native().makeKeyWindow();
     }
 
@@ -175,8 +177,26 @@ impl Panel {
     }
 }
 
-/// Nonactivating panels keep the external application's process frontmost.
-pub fn frontmost_pid() -> Option<i32> {
+/// The external process that stays frontmost while the nonactivating panel is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PasteTarget(i32);
+
+impl PasteTarget {
+    pub fn capture() -> Option<Self> {
+        frontmost_pid().map(Self)
+    }
+
+    /// The panel never activates Neo, so the target must still be frontmost.
+    pub fn is_available(&self) -> bool {
+        self.is_foreground()
+    }
+
+    pub fn is_foreground(&self) -> bool {
+        frontmost_pid() == Some(self.0)
+    }
+}
+
+fn frontmost_pid() -> Option<i32> {
     let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
     let pid = app.processIdentifier();
     (pid != std::process::id() as i32).then_some(pid)

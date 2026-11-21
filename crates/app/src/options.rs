@@ -134,9 +134,10 @@ mod tests {
     }
     #[test]
     fn explicit_test_parent_and_locale_are_preserved() {
+        let parent = std::env::temp_dir().join("neo-options-test");
         let options = Options::parse(args(&[
             "--data-parent",
-            "/tmp/neo-options-test",
+            parent.to_str().unwrap(),
             "--environment",
             "dev",
             "--locale",
@@ -145,7 +146,7 @@ mod tests {
             "--no-capture",
         ]))
         .unwrap();
-        assert_eq!(options.data_parent, PathBuf::from("/tmp/neo-options-test"));
+        assert_eq!(options.data_parent, parent);
         assert_eq!(options.environment, Environment::Dev);
         assert!(matches!(options.locale, Locale::EnUs));
         assert!(options.show);

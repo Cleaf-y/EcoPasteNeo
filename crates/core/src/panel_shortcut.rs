@@ -1,4 +1,4 @@
-//! Persisted macOS panel activation choice. No platform permission or registration here.
+//! Persisted panel activation choice. No platform permission or registration here.
 
 use serde::{Deserialize, Serialize};
 
@@ -18,10 +18,14 @@ pub enum PanelShortcut {
     DoubleTap { modifier: TapModifier },
 }
 
+/// macOS keeps ⌃⌥⌘V; Windows uses Alt+C, the shortcut EcoPaste users there already know.
 impl Default for PanelShortcut {
     fn default() -> Self {
-        Self::Combination {
-            key: "Control+Alt+Super+KeyV".into(),
-        }
+        let key = if cfg!(target_os = "windows") {
+            "Alt+KeyC"
+        } else {
+            "Control+Alt+Super+KeyV"
+        };
+        Self::Combination { key: key.into() }
     }
 }

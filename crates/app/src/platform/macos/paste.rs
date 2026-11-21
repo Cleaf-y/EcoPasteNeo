@@ -11,7 +11,7 @@ unsafe extern "C" {
 }
 
 /// Check without prompting; denial must precede clipboard mutation and key injection.
-pub fn check_permission(locale: Locale) -> Result<()> {
+pub fn check_paste_permission(locale: Locale) -> Result<()> {
     if unsafe { AXIsProcessTrusted() } {
         return Ok(());
     }
@@ -24,7 +24,7 @@ pub fn check_permission(locale: Locale) -> Result<()> {
 }
 
 /// Construct both events before posting either, then send one complete Command-V.
-pub fn simulate_paste() -> Result<()> {
+pub fn send_paste_keys() -> Result<()> {
     let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
         .map_err(|_| anyhow!("Could not create keyboard event source"))?;
     let down = CGEvent::new_keyboard_event(source.clone(), 0x09, true)

@@ -1,4 +1,4 @@
-use super::shortcut::ModifierListener;
+use crate::platform::{self, ModifierListener};
 use anyhow::{Context, Result};
 use ecopaste_neo_app::locale::Locale;
 use ecopaste_neo_core::panel_shortcut::PanelShortcut;
@@ -6,10 +6,9 @@ use global_hotkey::{
     GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState,
     hotkey::{Code, HotKey},
 };
-use objc2::MainThreadMarker;
 use tray_icon::{
-    Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{Menu, MenuEvent, MenuId, MenuItem, Submenu},
+    MouseButton, MouseButtonState, TrayIcon, TrayIconEvent,
+    menu::{Menu, MenuEvent, MenuId, MenuItem},
 };
 
 #[derive(Clone, Debug)]
@@ -26,7 +25,7 @@ enum Activation {
     DoubleTap(ModifierListener),
 }
 
-/// Main-thread-owned integration using GPUI's existing AppKit event loop.
+/// Main-thread-owned integration using GPUI's existing platform event loop.
 /// Poll next_action from GPUI; no event thread or second run loop is created.
 pub struct SystemIntegration {
     manager: GlobalHotKeyManager,
@@ -39,7 +38,7 @@ pub struct SystemIntegration {
     locale: Locale,
     tray: TrayIcon,
     _menu: Menu,
-    _application_menu: Menu,
+    _application_menu: Option<Menu>,
     show: MenuItem,
     settings: MenuItem,
     quit: MenuItem,
@@ -48,7 +47,8 @@ pub struct SystemIntegration {
 impl SystemIntegration {
     /// Create main-thread menu resources, then register the independent shortcut.
     pub fn new(locale: Locale, saved: Option<&PanelShortcut>) -> Result<Self> {
-        MainThreadMarker::new().context("Tray and global hotkey setup requires the main thread")?;
+        platform::ensure_main_thread()
+            .context("Tray and global hotkey setup requires the main thread")?;
         let manager =
             GlobalHotKeyManager::new().context("Could not initialize the global hotkey manager")?;
         let show = MenuItem::new(locale.show(), true, None);
@@ -56,24 +56,11 @@ impl SystemIntegration {
         let settings = MenuItem::new(locale.settings_title(), true, None);
         let menu = Menu::with_items(&[&show, &settings, &quit])
             .context("Could not build the tray menu")?;
-        let application = Submenu::with_items(
-            ecopaste_neo_core::identity::PRODUCT_NAME,
-            true,
-            &[&show, &settings, &quit],
-        )
-        .context("Could not build the application menu")?;
-        let application_menu =
-            Menu::with_items(&[&application]).context("Could not build the menu bar")?;
-        application_menu.init_for_nsapp();
-        let tray = TrayIconBuilder::new()
+        let application_menu = platform::install_application_menu(&[&show, &settings, &quit])?;
+        let tray = platform::tray_icon_builder(&menu)?
             .with_tooltip("EcoPasteNeo")
-            .with_title("Neo")
-            .with_icon(Self::icon()?)
-            .with_icon_as_template(true)
-            .with_menu(Box::new(menu.clone()))
-            .with_menu_on_left_click(true)
             .build()
-            .context("Could not create the macOS menu bar icon")?;
+            .context("Could not create the tray icon")?;
         let mut integration = Self {
             manager,
             active: None,
@@ -112,7 +99,7 @@ impl SystemIntegration {
             Some(Activation::Combination(key)) => self.locale.combination_label(&key.to_string()),
             Some(Activation::DoubleTap(listener)) => {
                 self.locale.shortcut_label(&PanelShortcut::DoubleTap {
-                    modifier: listener.modifier,
+                    modifier: listener.modifier(),
                 })
             }
             None => self.locale.shortcut_inactive().into(),
@@ -204,30 +191,10 @@ impl SystemIntegration {
         }
     }
 
-    /// Draw a monochrome clipboard template that follows the menu bar appearance.
-    fn icon() -> Result<Icon> {
-        const SIZE: u32 = 18;
-        let mut rgba = vec![0; (SIZE * SIZE * 4) as usize];
-        // A monochrome clipboard outline and two content strokes. AppKit's
-        // template rendering adapts the black/transparent mark to light/dark mode.
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                let outline = ((x == 4 || x == 13) && (4..=15).contains(&y))
-                    || ((y == 4 || y == 15) && (4..=13).contains(&x));
-                let clip = (7..=10).contains(&x) && (2..=5).contains(&y);
-                let strokes = (y == 8 || y == 11) && (7..=10).contains(&x);
-                if outline || clip || strokes {
-                    rgba[((y * SIZE + x) * 4 + 3) as usize] = 255;
-                }
-            }
-        }
-        Icon::from_rgba(rgba, SIZE, SIZE).context("Could not generate the tray icon")
-    }
-
     /// Drain native receivers from the existing GPUI event loop.
     pub fn next_action(&mut self) -> Option<SystemAction> {
         assert!(
-            MainThreadMarker::new().is_some(),
+            platform::ensure_main_thread().is_ok(),
             "System events must be polled on the main thread"
         );
         if let Ok(event) = MenuEvent::receiver().try_recv() {
@@ -343,7 +310,12 @@ mod tests {
             assert!(key.mods.contains(Modifiers::CONTROL | Modifiers::ALT));
             assert_eq!(key.to_string().parse::<HotKey>().unwrap(), key);
             let label = Locale::ZhCn.combination_label(&key.to_string());
-            assert!(label.starts_with("⌃⌥⌘"), "{label}");
+            let expected = if cfg!(target_os = "windows") {
+                "Ctrl+Alt+Win+"
+            } else {
+                "⌃⌥⌘"
+            };
+            assert!(label.starts_with(expected), "{label}");
             assert!(!label.contains("meta"));
         }
     }

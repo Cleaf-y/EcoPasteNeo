@@ -11,7 +11,10 @@ impl Locale {
         self.text("登录时启动", "Launch at login")
     }
     pub fn login_hint(self) -> &'static str {
-        self.text("登录后在后台运行。状态以 macOS 为准；不会在下次启动时自动恢复被关闭的登录项。", "Run in the background after login. macOS owns this status; starting Neo will not re-enable a disabled login item.")
+        self.platform_text(
+            ("登录后在后台运行。状态以 macOS 为准；不会在下次启动时自动恢复被关闭的登录项。", "Run in the background after login. macOS owns this status; starting Neo will not re-enable a disabled login item."),
+            ("登录后在后台运行。", "Run in the background after login."),
+        )
     }
     pub fn login_disabled(self) -> &'static str {
         self.text("未注册", "Not registered")
@@ -29,9 +32,15 @@ impl Locale {
         self.text("系统未找到登录服务", "Login service not found")
     }
     pub fn login_unsupported(self) -> &'static str {
-        self.text(
-            "登录启动需要 macOS 13 或更新版本",
-            "Launch at login requires macOS 13 or later",
+        self.platform_text(
+            (
+                "登录启动需要 macOS 13 或更新版本",
+                "Launch at login requires macOS 13 or later",
+            ),
+            (
+                "Windows 版暂不支持登录时启动",
+                "Launch at login is not available on Windows yet",
+            ),
         )
     }
     pub fn login_packaged_app(self) -> &'static str {
@@ -47,7 +56,7 @@ impl Locale {
         self.text("无法更改登录启动", "Could not change login startup")
     }
     pub fn login_loading(self) -> &'static str {
-        self.text("正在查询 macOS 登录项…", "Querying macOS login item…")
+        self.text("正在查询系统登录项…", "Querying system login item…")
     }
     pub fn login_refresh(self) -> &'static str {
         self.text("刷新登录项状态", "Refresh login status")
@@ -65,6 +74,20 @@ impl Locale {
             Self::EnUs => en,
         }
     }
+
+    /// Pick wording for the running platform, then the language: `(zh, en)` pairs.
+    fn platform_text(
+        self,
+        macos: (&'static str, &'static str),
+        windows: (&'static str, &'static str),
+    ) -> &'static str {
+        let (zh, en) = if cfg!(target_os = "windows") {
+            windows
+        } else {
+            macos
+        };
+        self.text(zh, en)
+    }
     pub fn shortcut_title(self) -> &'static str {
         self.text("历史面板全局快捷键", "Global history panel shortcut")
     }
@@ -75,9 +98,21 @@ impl Locale {
         self.text("双击修饰键", "Double-tap modifier")
     }
     pub fn shortcut_combination_hint(self) -> &'static str {
+        self.platform_text(
+            (
+                "也可输入组合名称（如 Control+Alt+Super+KeyV）。点击保存后生效。",
+                "Or enter a combination (e.g. Control+Alt+Super+KeyV). Save to apply.",
+            ),
+            (
+                "也可输入组合名称（如 Alt+KeyC）。点击保存后生效。",
+                "Or enter a combination (e.g. Alt+KeyC). Save to apply.",
+            ),
+        )
+    }
+    pub fn shortcut_double_unsupported(self) -> &'static str {
         self.text(
-            "也可输入组合名称（如 Control+Alt+Super+KeyV）。点击保存后生效。",
-            "Or enter a combination (e.g. Control+Alt+Super+KeyV). Save to apply.",
+            "Windows 版暂不支持双击修饰键，请改用组合键。",
+            "Double-tap is not available on Windows yet; choose a combination.",
         )
     }
     pub fn shortcut_record(self) -> &'static str {
@@ -132,28 +167,40 @@ impl Locale {
         format!("{}: {description}", self.text("当前生效", "Active"))
     }
     pub fn combination_label(self, key: &str) -> String {
-        key.replace("control+", "⌃")
-            .replace("Control+", "⌃")
-            .replace("alt+", "⌥")
-            .replace("Alt+", "⌥")
-            .replace("shift+", "⇧")
-            .replace("Shift+", "⇧")
-            .replace("super+", "⌘")
-            .replace("Super+", "⌘")
-            .replace("meta+", "⌘")
-            .replace("Meta+", "⌘")
-            .replace("Key", "")
-            .replace("Digit", "")
+        let symbols: [(&str, &str); 4] = if cfg!(target_os = "windows") {
+            [
+                ("control+", "Ctrl+"),
+                ("alt+", "Alt+"),
+                ("shift+", "Shift+"),
+                ("super+", "Win+"),
+            ]
+        } else {
+            [
+                ("control+", "⌃"),
+                ("alt+", "⌥"),
+                ("shift+", "⇧"),
+                ("super+", "⌘"),
+            ]
+        };
+        let mut label = key.replace("meta+", "super+").replace("Meta+", "super+");
+        for (name, symbol) in symbols {
+            let capitalized = format!("{}{}", name[..1].to_uppercase(), &name[1..]);
+            label = label.replace(name, symbol).replace(&capitalized, symbol);
+        }
+        label.replace("Key", "").replace("Digit", "")
     }
     pub fn modifier_label(
         self,
         modifier: ecopaste_neo_core::panel_shortcut::TapModifier,
     ) -> &'static str {
         use ecopaste_neo_core::panel_shortcut::TapModifier::*;
+        let windows = cfg!(target_os = "windows");
         match modifier {
             Control => "Control",
+            Option if windows => "Alt",
             Option => "Option",
             Shift => "Shift",
+            Command if windows => "Win",
             Command => "Command",
         }
     }
@@ -218,7 +265,10 @@ impl Locale {
         self.text("排除应用", "Excluded applications")
     }
     pub fn excluded_apps_hint(self) -> &'static str {
-        self.text("选择 .app 应用，按应用标识排除之后的复制。已有历史记录保留。", "Choose a .app to exclude future copies by application identifier. Existing history is kept.")
+        self.platform_text(
+            ("选择 .app 应用，按应用标识排除之后的复制。已有历史记录保留。", "Choose a .app to exclude future copies by application identifier. Existing history is kept."),
+            ("选择应用的 .exe 文件，按程序路径排除之后的复制。已有历史记录保留。", "Choose an application's .exe to exclude future copies by program path. Existing history is kept."),
+        )
     }
     pub fn add_application(self) -> &'static str {
         self.text("添加应用…", "Add application…")
@@ -233,9 +283,15 @@ impl Locale {
         self.text("未排除任何应用", "No applications excluded")
     }
     pub fn invalid_application(self) -> &'static str {
-        self.text(
-            "无法添加应用。请选择带有有效应用标识的 .app。",
-            "Could not add application. Choose a .app with a valid application identifier.",
+        self.platform_text(
+            (
+                "无法添加应用。请选择带有有效应用标识的 .app。",
+                "Could not add application. Choose a .app with a valid application identifier.",
+            ),
+            (
+                "无法添加应用。请选择本机上的 .exe 程序。",
+                "Could not add application. Choose a local .exe program.",
+            ),
         )
     }
     pub fn settings_error(self, unavailable: bool, error: &str) -> String {
@@ -286,7 +342,7 @@ impl Locale {
         self.text("粘贴失败", "Paste failed")
     }
     pub fn preview(self) -> &'static str {
-        self.text("预览 ⌘P", "Preview ⌘P")
+        self.platform_text(("预览 ⌘P", "Preview ⌘P"), ("预览 Ctrl+P", "Preview Ctrl+P"))
     }
     pub fn preview_title(self) -> &'static str {
         self.text("记录预览", "Record preview")

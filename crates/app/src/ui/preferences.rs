@@ -1,7 +1,5 @@
-use super::{
-    login::{self, LoginStatus},
-    system::{SystemIntegration, parse_combination},
-};
+use super::system::{SystemIntegration, parse_combination};
+use crate::platform::{self, LoginStatus, login};
 use ecopaste_neo_app::{history::HistorySource, locale::Locale};
 use ecopaste_neo_core::panel_shortcut::{PanelShortcut, TapModifier};
 use ecopaste_neo_core::{
@@ -20,7 +18,6 @@ use gpui_component::{
     input::{Input, InputState},
     switch::Switch,
 };
-use objc2_foundation::{NSBundle, NSString};
 use std::{cell::RefCell, rc::Rc};
 
 /// Retains the view and pending write across normal window close/recreation.
@@ -360,15 +357,7 @@ impl Preferences {
         self.picker = Some(cx.spawn(async move |this, cx| {
             let result = match selection.await {
                 Ok(Ok(Some(paths))) => background
-                    .spawn(async move {
-                        let path = paths.first()?;
-                        if path.extension()? != "app" {
-                            return None;
-                        }
-                        let bundle = NSBundle::bundleWithPath(&NSString::from_str(path.to_str()?))?;
-                        let id = bundle.bundleIdentifier()?.to_string();
-                        (!id.is_empty() && !id.chars().any(char::is_whitespace)).then_some(id)
-                    })
+                    .spawn(async move { platform::application_id_from_path(paths.first()?) })
                     .await
                     .ok_or(())
                     .map(Some),
@@ -508,7 +497,7 @@ impl Render for Preferences {
                     .child(
                         Button::new("shortcut-double")
                             .label(self.locale.shortcut_double())
-                            .disabled(disabled)
+                            .disabled(disabled || !platform::DOUBLE_TAP_SUPPORTED)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.recording = false;
                                 this.integration.borrow_mut().edit(false);

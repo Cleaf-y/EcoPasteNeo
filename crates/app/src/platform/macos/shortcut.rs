@@ -32,7 +32,7 @@ unsafe extern "C" {
 
 /// Owns the callback until the run-loop source and Mach port are invalidated.
 pub struct ModifierListener {
-    pub modifier: TapModifier,
+    modifier: TapModifier,
     tap: CGEventTap<'static>,
     source: CFRunLoopSource,
     enabled: Rc<Cell<bool>>,
@@ -118,6 +118,10 @@ impl ModifierListener {
             fired,
             gesture,
         })
+    }
+
+    pub fn modifier(&self) -> TapModifier {
+        self.modifier
     }
 
     pub fn available(&self) -> bool {

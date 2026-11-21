@@ -14,22 +14,34 @@ anyhow = "1"
 ecopaste-neo-core = { path = "../core", features = ["preview", "system-clipboard"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
 # gpui-component 0.10.0 requires this exact snapshot; upgrade the trio together.
 gpui = { package = "gpui-pre", version = "=0.3.12", default-features = false }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", default-features = false, features = ["font-kit", "runtime_shaders"] }
 gpui-component = "=0.10.0"
+raw-window-handle = "0.6"
+global-hotkey = "0.10"
+tray-icon = "0.21"
+
+[target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = { version = "0.3", features = ["objc2-core-services"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
-raw-window-handle = "0.6"
 core-graphics = "0.24"
 core-foundation = "0.10"
 foreign-types = "0.5"
-global-hotkey = "0.10"
-tray-icon = "0.21"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+drag = "2"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tempfile = "3"

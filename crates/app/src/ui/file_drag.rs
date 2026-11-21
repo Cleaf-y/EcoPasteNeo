@@ -1,5 +1,5 @@
 use super::*;
-use crate::macos::drag_out::{self, NativeDrag, PressEvent};
+use crate::platform::{NativeDrag, PressEvent};
 use ecopaste_neo_app::drag::{DragGesture, DragRequest};
 use gpui::{MouseDownEvent, MouseMoveEvent};
 
@@ -86,7 +86,7 @@ impl HistoryPanel {
         if !self.visible
             || self.pasting
             || self.management.blocks_list()
-            || !drag_out::left_button_down()
+            || !platform::left_button_down()
         {
             self.file_drag.release();
             return;
@@ -139,7 +139,7 @@ impl HistoryPanel {
     }
 
     /// Completion only clears tracking. Finder receipt is verified independently.
-    pub(in crate::macos) fn poll_drag(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::ui) fn poll_drag(&mut self, cx: &mut Context<Self>) {
         if self
             .file_drag
             .native
@@ -151,7 +151,7 @@ impl HistoryPanel {
             self.file_drag.release();
             self.check_panel_focus(cx);
             cx.notify();
-        } else if !self.file_drag.gesture.active() && !drag_out::left_button_down() {
+        } else if !self.file_drag.gesture.active() && !platform::left_button_down() {
             self.file_drag.release();
         }
     }

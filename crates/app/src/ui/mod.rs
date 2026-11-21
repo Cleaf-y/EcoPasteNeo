@@ -1,24 +1,19 @@
-mod drag_out;
 mod history_menu;
-mod login;
-mod native;
 mod panel;
-mod paste;
 mod preferences;
 mod record_preview;
-mod shortcut;
 mod system;
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use ecopaste_neo_app::{history::HistorySource, options::Options};
-use gpui::{
-    App, AppContext, Bounds, WindowBounds, WindowKind, WindowOptions, WindowingRequest, px, size,
-};
+use gpui::{App, AppContext, Bounds, WindowBounds, WindowKind, WindowOptions, px, size};
 use gpui_component::Root;
 use panel::HistoryPanel;
 use system::{SystemAction, SystemIntegration};
+
+use crate::platform;
 
 /// Start the native UI only after storage has been validated and migrated.
 pub fn run() -> Result<()> {
@@ -28,10 +23,9 @@ pub fn run() -> Result<()> {
         "EcoPasteNeo database: {}",
         source.paths().db_path().display()
     );
-    // Set accessory policy before AppKit launches; the graphical backend stays available.
-    let application = gpui_platform::application().with_windowing(WindowingRequest::Headless);
+    let application = platform::application();
     application.run(move |cx: &mut App| {
-        let login_startup = login::launched_at_login();
+        let login_startup = platform::login::launched_at_login();
         gpui_component::init(cx);
         let integration = match SystemIntegration::new(
             options.locale,
