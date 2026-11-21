@@ -61,7 +61,7 @@ EcoPaste 采用 Rust-First 的 Tauri 架构：
 - macOS 或 Windows。
 - Node.js 20 或更高版本。
 - pnpm 10 或更高版本。
-- `rust-toolchain.toml` 指定的 Rust 工具链（`1.96.0`，包含 `rustfmt` 和 `clippy`）。
+- `rust-toolchain.toml` 指定的 Rust 工具链（`1.100.0`，包含 `rustfmt` 和 `clippy`）。
 - Tauri v2 所需的系统原生依赖。请参考
   [Tauri prerequisites](https://tauri.app/start/prerequisites/) 中对应系统的说明。
 

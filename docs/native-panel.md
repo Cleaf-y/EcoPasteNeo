@@ -197,7 +197,7 @@ fixture_parent="$(mktemp -d /private/tmp/ecopaste-settings10.XXXXXX)"
 
 Windows 版与 macOS 共用 `ui/` 下的全部界面和粘贴流程，系统调用在 `platform/windows/`。这一版用来实测 GPUI 在 Windows 上是否满足剪贴板面板的要求，结论决定后续 Windows 实现的做法。
 
-**构建。** 需要 rustup（会按 `rust-toolchain.toml` 安装 1.96）和 Visual Studio Build Tools 的“使用 C++ 的桌面开发”。debug 版在运行时编译 GPUI 着色器，不需要 Windows SDK 的 `fxc.exe`；release 版构建时需要。debug 版保留控制台窗口，便于看日志。也可以直接下载 GitHub Actions 中 “Neo Check” 工作流产出的 `EcoPasteNeo-windows-debug`。
+**构建。** 需要 rustup（会按 `rust-toolchain.toml` 安装 1.100）和 Visual Studio Build Tools 的“使用 C++ 的桌面开发”。debug 版在运行时编译 GPUI 着色器，不需要 Windows SDK 的 `fxc.exe`；release 版构建时需要。debug 版保留控制台窗口，便于看日志。也可以直接下载 GitHub Actions 中 “Neo Check” 工作流产出的 `EcoPasteNeo-windows-debug`。
 
 ```powershell
 cargo build -p ecopaste-neo-app --bin EcoPasteNeo --locked

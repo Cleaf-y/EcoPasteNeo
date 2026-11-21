@@ -73,7 +73,7 @@ and `window://visibility`.
 - macOS or Windows.
 - Node.js 20 or newer.
 - pnpm 10 or newer.
-- Rust toolchain from `rust-toolchain.toml` (`1.96.0`, with `rustfmt` and
+- Rust toolchain from `rust-toolchain.toml` (`1.100.0`, with `rustfmt` and
   `clippy`).
 - Native dependencies required by Tauri v2. See the
   [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your

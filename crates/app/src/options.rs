@@ -45,7 +45,7 @@ impl Options {
         let mut locale = Locale::ZhCn;
         let mut auto_launch = false;
         let mut capture =
-            !std::env::var_os("ECOPASTENEO_NO_CAPTURE").is_some_and(|value| value == "1");
+            std::env::var_os("ECOPASTENEO_NO_CAPTURE").is_none_or(|value| value != "1");
         while let Some(argument) = args.next() {
             match argument.as_str() {
                 "--show" => show = true,
