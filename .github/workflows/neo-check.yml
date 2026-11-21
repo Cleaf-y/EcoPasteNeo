@@ -57,7 +57,48 @@ jobs:
       - name: Test app
         run: cargo test -p ecopaste-neo-app --locked
 
-      # Debug builds compile GPUI shaders at runtime, so no Windows SDK shader compiler is needed.
+      - name: Test embedded Windows debug shaders
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $messages = cargo test -p gpui-pre-windows --lib --no-run --locked --message-format=json
+          if ($LASTEXITCODE -ne 0) { throw 'Shader test build failed' }
+          $artifacts = @($messages | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object {
+            $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'gpui_windows' -and $_.profile.test -and $_.executable
+          })
+          if ($artifacts.Count -ne 1) { throw 'Expected one Windows shader test executable' }
+          $testName = 'directx_renderer::shader_resources::tests::embedded_debug_shaders_compile'
+          $tests = & $artifacts[0].executable --list
+          if ($LASTEXITCODE -ne 0 -or -not ($tests -contains "${testName}: test")) {
+            throw 'Embedded shader regression test is missing'
+          }
+          $shaders = @('shaders.hlsl', 'alpha_correction.hlsl') | ForEach-Object {
+            Join-Path $PWD "vendor/gpui-pre-windows/src/$_"
+          }
+          foreach ($shader in $shaders) {
+            if (-not (Test-Path -LiteralPath $shader) -or (Test-Path -LiteralPath "$shader.portability-check")) {
+              throw "Cannot isolate shader source: $shader"
+            }
+          }
+          try {
+            foreach ($shader in $shaders) {
+              Move-Item -LiteralPath $shader -Destination "$shader.portability-check"
+            }
+            & $artifacts[0].executable --exact $testName --nocapture
+            if ($LASTEXITCODE -ne 0) { throw 'Embedded shader test failed without source files' }
+          } finally {
+            foreach ($shader in $shaders) {
+              if (Test-Path -LiteralPath "$shader.portability-check") {
+                Move-Item -LiteralPath "$shader.portability-check" -Destination $shader
+              }
+            }
+          }
+
+      - name: Test hidden Windows initial placement
+        if: runner.os == 'Windows'
+        run: cargo test -p gpui-pre-windows --lib initial_placement_keeps_requested_bounds_without_showing --locked
+
+      # Debug builds compile embedded GPUI shaders at runtime, so no Windows SDK shader compiler is needed.
       - name: Build Windows debug executable
         if: runner.os == 'Windows'
         run: cargo build -p ecopaste-neo-app --bin EcoPasteNeo --locked

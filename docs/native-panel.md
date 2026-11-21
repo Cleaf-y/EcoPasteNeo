@@ -197,7 +197,7 @@ fixture_parent="$(mktemp -d /private/tmp/ecopaste-settings10.XXXXXX)"
 
 Windows 版与 macOS 共用 `ui/` 下的全部界面和粘贴流程，系统调用在 `platform/windows/`。这一版用来实测 GPUI 在 Windows 上是否满足剪贴板面板的要求，结论决定后续 Windows 实现的做法。
 
-**构建。** 需要 rustup（会按 `rust-toolchain.toml` 安装 1.100）和 Visual Studio Build Tools 的“使用 C++ 的桌面开发”。debug 版在运行时编译 GPUI 着色器，不需要 Windows SDK 的 `fxc.exe`；release 版构建时需要。debug 版保留控制台窗口，便于看日志。也可以直接下载 GitHub Actions 中 “Neo Check” 工作流产出的 `EcoPasteNeo-windows-debug`。
+**构建。** 需要 rustup（会按 `rust-toolchain.toml` 安装 1.100）和 Visual Studio Build Tools 的“使用 C++ 的桌面开发”。debug 版在运行时编译嵌入 exe 的 GPUI 着色器，不需要外部 HLSL 文件或 Windows SDK 的 `fxc.exe`；release 版构建时需要。debug 版保留控制台窗口，便于看日志。也可以直接下载 GitHub Actions 中 “Neo Check” 工作流产出的 `EcoPasteNeo-windows-debug`。Windows debug 着色器加载使用本地补丁，来源与复验步骤见 [`vendor/gpui-pre-windows/PATCHES.md`](../vendor/gpui-pre-windows/PATCHES.md)。
 
 ```powershell
 cargo build -p ecopaste-neo-app --bin EcoPasteNeo --locked
@@ -209,6 +209,8 @@ cargo run -p ecopaste-neo-app --example seed_history --locked -- --data-parent $
 ```
 
 默认数据父目录是 `%LOCALAPPDATA%`。加 `--no-capture` 可在测试期间不记录本机剪贴板。目前没有单实例保护，不要同时运行两份。
+
+**首次显示。** 启动显示在 `open_window` 完成并安装根视图后执行。Windows 本地依赖补丁在窗口仍隐藏时应用请求的尺寸，避免原生显示绕过 GPUI 激活流程后沿用系统默认尺寸。验收需分别从进程完全退出开始，检查 `--show` 首次显示及后台启动后的第一次快捷键/托盘显示，不能只检查隐藏后再次唤出。
 
 **当前行为。** 托盘图标左键显示面板，右键打开“显示历史记录 / 设置 / 退出”菜单。默认全局快捷键是 **Alt+C**，可在设置中修改。面板是普通的可获得焦点窗口：唤出时记下当前前台窗口，然后自己获得焦点，可以直接打字搜索；点到面板外会隐藏。Enter 或单击记录时，先把前台交还给记下的窗口，再发送 Ctrl+V；Shift+Enter 为纯文本粘贴。Ctrl+P 打开预览，右键卡片打开管理菜单。文件和图片记录可以拖到资源管理器，只复制、不移动，暂无拖动预览图。双击修饰键和登录时启动尚未实现：设置中双击按钮不可用，登录启动显示为不可用。
 

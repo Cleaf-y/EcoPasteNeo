@@ -8,6 +8,8 @@ resolver = "2"
 [patch.crates-io]
 # GPUI 0.3.12: AppKit cold-launch IME initialization and candidate window level.
 gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
+# GPUI 0.3.12: embed debug HLSL sources instead of reading the build machine's path.
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 
 [profile.dev]
 debug = 0

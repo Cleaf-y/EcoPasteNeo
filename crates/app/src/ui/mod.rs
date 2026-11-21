@@ -74,15 +74,20 @@ pub fn run() -> Result<()> {
                         let _ = weak.update(cx, |view, cx| view.hide(cx));
                         false
                     });
-                    if startup.panel {
-                        view.update(cx, |view, cx| view.show(window, cx));
-                    }
                     panel = Some(view.clone());
                     cx.new(|cx| Root::new(view, window, cx))
                 },
             )
             .expect("Cannot create EcoPasteNeo panel");
         let panel = panel.expect("Panel view must exist");
+        // Native show messages can request a frame, so the root must already be installed.
+        if startup.panel {
+            handle
+                .update(cx, |_, window, cx| {
+                    panel.update(cx, |view, cx| view.show(window, cx));
+                })
+                .expect("Created panel window must remain available");
+        }
         let settings_panel = panel.downgrade();
         settings.on_saved(
             move |cx| {
